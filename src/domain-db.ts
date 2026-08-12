@@ -10,16 +10,14 @@
 import { cacheAtomicUpdate, cacheGet } from "./cache.js";
 
 export const DOMAIN_RECORD_TTL_SECONDS = 90 * 24 * 60 * 60;
-// Bumped 4->5 because tier1 changed provider from Firecrawl to Cloudflare
-// Browser Run. Schema-4 records are migrated on the next write: tier1 stats
-// are reset, while Crawl4AI/raw/Wayback/GitHub history and capability learning
-// are preserved. Reads continue to reject stale schemas until that migration
-// write occurs.
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 4;
 const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type TierName =
   | "tier1_cloudflare"
+  // Compatibility alias for schema-4 history/tests from the upstream
+  // Firecrawl implementation. Production routing no longer emits this name.
+  | "tier1_firecrawl"
   | "tier2_crawl4ai"
   | "tier3_rawfetch"
   | "tier4_wayback"
@@ -98,6 +96,11 @@ export interface DomainRecord {
     tier4: TierStat;
     github: TierStat;
   };
+  // Tier slots are stable across provider swaps, so provider identity is
+  // tracked separately rather than forcing a whole domain-db schema bump.
+  // Records without this field predate the Cloudflare Tier-1 migration and
+  // their tier1 stats must not influence Cloudflare routing.
+  tier1_provider?: "cloudflare";
   preferred_strategy?: PreferredStrategy;
   notes?: string;
 }
@@ -120,38 +123,7 @@ function newRecord(domain: string, now: string): DomainRecord {
       tier4: emptyStat(),
       github: emptyStat(),
     },
-  };
-}
-
-function migrateSchema4Record(
-  parsed: DomainRecord,
-  domain: string,
-  now: string,
-): DomainRecord | null {
-  if (parsed.schema_version !== 4) return null;
-  const stats = parsed.tier_stats_30d;
-  if (
-    !stats?.tier1 ||
-    !stats.tier2 ||
-    !stats.tier3 ||
-    !stats.tier4 ||
-    !stats.github ||
-    !parsed.capabilities
-  ) {
-    return null;
-  }
-
-  return {
-    ...parsed,
-    schema_version: SCHEMA_VERSION,
-    domain,
-    last_fetch: now,
-    // Firecrawl's tier1 success/failure history is not comparable with the
-    // new Cloudflare provider. Preserve all other learned slots.
-    tier_stats_30d: {
-      ...stats,
-      tier1: emptyStat(),
-    },
+    tier1_provider: "cloudflare",
   };
 }
 
@@ -211,11 +183,10 @@ function updateRecord(
     if (raw) {
       try {
         const parsed = JSON.parse(raw) as DomainRecord;
-        if (parsed.schema_version === SCHEMA_VERSION) {
-          record = parsed;
-        } else {
-          record = migrateSchema4Record(parsed, hostname, now) ?? newRecord(hostname, now);
-        }
+        record =
+          parsed.schema_version === SCHEMA_VERSION
+            ? parsed
+            : newRecord(hostname, now);
       } catch {
         record = newRecord(hostname, now);
       }
@@ -233,6 +204,7 @@ const TIER_KEY: Record<
   "tier1" | "tier2" | "tier3" | "tier4" | "github"
 > = {
   tier1_cloudflare: "tier1",
+  tier1_firecrawl: "tier1",
   tier2_crawl4ai: "tier2",
   tier3_rawfetch: "tier3",
   tier4_wayback: "tier4",
@@ -247,6 +219,14 @@ export async function recordTierAttempt(
 ): Promise<void> {
   const slot = TIER_KEY[tier];
   await updateRecord(url, (record) => {
+    // Schema 4 used the stable `tier1` slot for Firecrawl. The first
+    // Cloudflare attempt explicitly starts a fresh Tier-1 learning window,
+    // while leaving every other domain capability/stat untouched.
+    if (tier === "tier1_cloudflare" && record.tier1_provider !== "cloudflare") {
+      record.tier_stats_30d.tier1 = emptyStat();
+      record.tier1_provider = "cloudflare";
+    }
+
     const stat = record.tier_stats_30d[slot];
     if (Date.now() - stat.window_start_ms > WINDOW_MS) {
       stat.attempts = 0;

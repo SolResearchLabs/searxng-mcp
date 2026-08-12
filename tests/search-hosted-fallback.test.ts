@@ -65,6 +65,8 @@ function searxResponse(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockFetch.mockReset();
+  hosted.searchHostedFallback.mockReset();
   delete process.env.HOSTED_SEARCH_FALLBACK_WITH_ENGINE_FILTER;
   hosted.searchHostedFallback.mockResolvedValue(null);
 });

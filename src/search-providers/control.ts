@@ -57,9 +57,11 @@ export function runHostedSearchProvider<T>(
 
 export function hostedSearchControlSnapshot() {
   return Object.fromEntries(
-    (Object.entries(controls) as Array<
-      [HostedSearchProviderId, HostedProviderControl]
-    >).map(([id, control]) => [
+    (
+      Object.entries(controls) as Array<
+        [HostedSearchProviderId, HostedProviderControl]
+      >
+    ).map(([id, control]) => [
       id,
       {
         ...control.gate.snapshot(),

@@ -1,21 +1,24 @@
+export { cloudflareSnapshot } from "./cloudflare.js";
 export { applyTier2Readability, crawl4aiFetch } from "./crawl4ai.js";
+// Keep the legacy adapter exported while crawl_site still uses Firecrawl in
+// this phase. It is no longer part of the page-fetch cascade.
 export { firecrawlScrape } from "./firecrawl.js";
 export { githubFetch, isGithubUrl } from "./github.js";
 export { fetchRawHtmlForMetadata, rawFetch } from "./raw.js";
 export type { Tier } from "./types.js";
 export { waybackFetch } from "./wayback.js";
 
+import { cloudflareSnapshot } from "./cloudflare.js";
 import { applyTier2Readability, crawl4aiFetch } from "./crawl4ai.js";
-import { firecrawlScrape } from "./firecrawl.js";
 import { rawFetch } from "./raw.js";
 import type { Tier } from "./types.js";
 
-/** Tier 1 — Firecrawl (Puppeteer-rendered, best quality). */
+/** Tier 1 — Cloudflare Browser Run (remote browser-rendered snapshot). */
 export const tier1: Tier = {
-  name: "tier1_firecrawl",
+  name: "tier1_cloudflare",
   slot: "tier1",
   async fetch(url, maxChars, _preferFit, tuning) {
-    const r = await firecrawlScrape(url, maxChars, tuning);
+    const r = await cloudflareSnapshot(url, maxChars, tuning);
     return r?.text ? r : null;
   },
 };

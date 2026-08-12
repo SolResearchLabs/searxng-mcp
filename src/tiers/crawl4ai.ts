@@ -12,6 +12,7 @@ import {
   readBoundedText,
   type TierResult,
 } from "../fetch-utils.js";
+import { runCrawl4ai } from "../provider-control.js";
 
 export async function pollCrawl4aiTask(
   taskId: string,
@@ -66,81 +67,94 @@ export async function crawl4aiFetch(
 ): Promise<TierResult | null> {
   if (!CRAWL4AI_URL) return null;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  const controlKey = JSON.stringify([
+    url,
+    maxChars,
+    preferFit,
+    tuning?.targetSelector ?? "",
+    tuning?.waitForSelector ?? "",
+  ]);
 
-  try {
-    const crawlHeaders: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (CRAWL4AI_API_TOKEN)
-      crawlHeaders.Authorization = `Bearer ${CRAWL4AI_API_TOKEN}`;
-    // crawler_config is only attached when a selector is requested, so default
-    // crawls send the exact same body as before. Crawl4AI honors css_selector
-    // (scope extraction) and wait_for (CSS selector) natively.
-    const crawlerConfig: Record<string, string> = {};
-    if (tuning?.targetSelector)
-      crawlerConfig.css_selector = tuning.targetSelector;
-    if (tuning?.waitForSelector) {
-      crawlerConfig.wait_for = `css:${tuning.waitForSelector}`;
+  return runCrawl4ai(controlKey, async () => {
+    // Start the request timeout only after the local bulkhead admits this job;
+    // queue wait should not consume Crawl4AI's actual execution allowance.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+
+    try {
+      const crawlHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (CRAWL4AI_API_TOKEN)
+        crawlHeaders.Authorization = `Bearer ${CRAWL4AI_API_TOKEN}`;
+      // crawler_config is only attached when a selector is requested, so default
+      // crawls send the exact same body as before. Crawl4AI honors css_selector
+      // (scope extraction) and wait_for (CSS selector) natively.
+      const crawlerConfig: Record<string, string> = {};
+      if (tuning?.targetSelector)
+        crawlerConfig.css_selector = tuning.targetSelector;
+      if (tuning?.waitForSelector) {
+        crawlerConfig.wait_for = `css:${tuning.waitForSelector}`;
+      }
+      const resp = await fetch(`${CRAWL4AI_URL}/crawl`, {
+        method: "POST",
+        headers: crawlHeaders,
+        body: JSON.stringify({
+          urls: [url],
+          ...(ADBLOCK_PROXY_URL
+            ? { proxy_config: { server: ADBLOCK_PROXY_URL } }
+            : {}),
+          ...(Object.keys(crawlerConfig).length > 0
+            ? { crawler_config: crawlerConfig }
+            : {}),
+        }),
+        signal: controller.signal,
+      });
+
+      if (!resp.ok) return null;
+      // Bounded read (2 MB cap) before JSON.parse — consistency with the rest of
+      // the fetch layer; caps memory even on an unexpected oversized response.
+      const data = JSON.parse(await readBoundedText(resp)) as Record<
+        string,
+        unknown
+      >;
+
+      // Synchronous response — results returned directly
+      if (Array.isArray(data.results) && data.results.length > 0) {
+        const result = data.results[0] as Record<string, unknown>;
+        const md = result.markdown as Record<string, string> | null;
+        const mdRaw = preferFit
+          ? md?.fit_markdown || md?.raw_markdown
+          : md?.raw_markdown || md?.fit_markdown;
+        const text = (mdRaw ?? "").slice(0, maxChars);
+        if (!text) return null;
+        const metadata = result.metadata as Record<string, string> | null;
+        const title = metadata?.title || url;
+        const html =
+          typeof result.html === "string" ? (result.html as string) : undefined;
+        return { title, url, text, html };
+      }
+
+      // Asynchronous response — poll for completion while retaining this one
+      // local-browser permit so another fallback cannot stampede the host.
+      if (typeof data.task_id === "string") {
+        if (!/^[a-zA-Z0-9_-]{1,64}$/.test(data.task_id)) return null;
+        return await pollCrawl4aiTask(
+          data.task_id,
+          url,
+          maxChars,
+          controller.signal,
+          preferFit,
+        );
+      }
+
+      return null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
     }
-    const resp = await fetch(`${CRAWL4AI_URL}/crawl`, {
-      method: "POST",
-      headers: crawlHeaders,
-      body: JSON.stringify({
-        urls: [url],
-        ...(ADBLOCK_PROXY_URL
-          ? { proxy_config: { server: ADBLOCK_PROXY_URL } }
-          : {}),
-        ...(Object.keys(crawlerConfig).length > 0
-          ? { crawler_config: crawlerConfig }
-          : {}),
-      }),
-      signal: controller.signal,
-    });
-
-    if (!resp.ok) return null;
-    // Bounded read (2 MB cap) before JSON.parse — consistency with the rest of
-    // the fetch layer; caps memory even on an unexpected oversized response.
-    const data = JSON.parse(await readBoundedText(resp)) as Record<
-      string,
-      unknown
-    >;
-
-    // Synchronous response — results returned directly
-    if (Array.isArray(data.results) && data.results.length > 0) {
-      const result = data.results[0] as Record<string, unknown>;
-      const md = result.markdown as Record<string, string> | null;
-      const mdRaw = preferFit
-        ? md?.fit_markdown || md?.raw_markdown
-        : md?.raw_markdown || md?.fit_markdown;
-      const text = (mdRaw ?? "").slice(0, maxChars);
-      if (!text) return null;
-      const metadata = result.metadata as Record<string, string> | null;
-      const title = metadata?.title || url;
-      const html =
-        typeof result.html === "string" ? (result.html as string) : undefined;
-      return { title, url, text, html };
-    }
-
-    // Asynchronous response — poll for completion
-    if (typeof data.task_id === "string") {
-      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(data.task_id)) return null;
-      return await pollCrawl4aiTask(
-        data.task_id,
-        url,
-        maxChars,
-        controller.signal,
-        preferFit,
-      );
-    }
-
-    return null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
+  });
 }
 
 export function applyTier2Readability(

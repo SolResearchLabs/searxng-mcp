@@ -10,6 +10,7 @@ import {
   USER_AGENT,
 } from "../fetch-utils.js";
 import { recordHistogram } from "../observability.js";
+import { runCloudflareQuickAction } from "../provider-control.js";
 
 interface CloudflareApiMessage {
   code?: number;
@@ -56,80 +57,89 @@ export async function cloudflareSnapshot(
     );
   }
 
-  const body: Record<string, unknown> = {
+  const controlKey = JSON.stringify([
     url,
-    formats: ["content", "markdown"],
-    userAgent: USER_AGENT,
-  };
+    maxChars,
+    tuning?.targetSelector ?? "",
+    tuning?.waitForSelector ?? "",
+  ]);
 
-  if (tuning?.waitForSelector) {
-    body.waitForSelector = {
-      selector: tuning.waitForSelector,
-      timeout: Math.min(CLOUDFLARE_BROWSER_TIMEOUT_MS, 60_000),
+  return runCloudflareQuickAction(controlKey, async () => {
+    const body: Record<string, unknown> = {
+      url,
+      formats: ["content", "markdown"],
+      userAgent: USER_AGENT,
     };
-  }
 
-  // Browser Run snapshot has no direct "return only this selector" option.
-  // Inject a bounded script after navigation that replaces the body with the
-  // requested subtree. The selector is JSON-encoded into the script rather
-  // than interpolated as source, preserving fetch_url's existing
-  // target_selector semantics without creating an injection primitive.
-  if (tuning?.targetSelector) {
-    body.addScriptTag = [
-      { content: targetSelectorScript(tuning.targetSelector) },
-    ];
-  }
+    if (tuning?.waitForSelector) {
+      body.waitForSelector = {
+        selector: tuning.waitForSelector,
+        timeout: Math.min(CLOUDFLARE_BROWSER_TIMEOUT_MS, 60_000),
+      };
+    }
 
-  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
-    CLOUDFLARE_ACCOUNT_ID,
-  )}/browser-rendering/snapshot`;
+    // Browser Run snapshot has no direct "return only this selector" option.
+    // Inject a bounded script after navigation that replaces the body with the
+    // requested subtree. The selector is JSON-encoded into the script rather
+    // than interpolated as source, preserving fetch_url's existing
+    // target_selector semantics without creating an injection primitive.
+    if (tuning?.targetSelector) {
+      body.addScriptTag = [
+        { content: targetSelectorScript(tuning.targetSelector) },
+      ];
+    }
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${CLOUDFLARE_BROWSER_API_TOKEN}`,
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(CLOUDFLARE_BROWSER_TIMEOUT_MS),
+    const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
+      CLOUDFLARE_ACCOUNT_ID,
+    )}/browser-rendering/snapshot`;
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${CLOUDFLARE_BROWSER_API_TOKEN}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(CLOUDFLARE_BROWSER_TIMEOUT_MS),
+    });
+
+    const browserMsHeader = res.headers.get("X-Browser-Ms-Used");
+    if (browserMsHeader !== null) {
+      const browserMs = Number(browserMsHeader);
+      if (Number.isFinite(browserMs) && browserMs >= 0) {
+        recordHistogram("browser", browserMs / 1000, {
+          provider: "cloudflare",
+          action: "snapshot",
+        });
+      }
+    }
+
+    const raw = await readBoundedText(res);
+    let data: CloudflareSnapshotResponse | null = null;
+    try {
+      data = JSON.parse(raw) as CloudflareSnapshotResponse;
+    } catch {
+      if (res.ok) {
+        throw new Error("Cloudflare Browser Run returned invalid JSON");
+      }
+    }
+
+    if (!res.ok) {
+      const detail = apiErrorDetail(data) ?? `${res.status} ${res.statusText}`;
+      throw new Error(`Cloudflare Browser Run error: ${detail}`);
+    }
+
+    if (!data?.success || !data.result) {
+      throw new Error(
+        apiErrorDetail(data) ??
+          "Cloudflare Browser Run returned no snapshot data",
+      );
+    }
+
+    const text = (data.result.markdown ?? "").slice(0, maxChars);
+    const html = data.result.content;
+    const title = data.meta?.title || url;
+
+    return { title, url, text, html };
   });
-
-  const browserMsHeader = res.headers.get("X-Browser-Ms-Used");
-  if (browserMsHeader !== null) {
-    const browserMs = Number(browserMsHeader);
-    if (Number.isFinite(browserMs) && browserMs >= 0) {
-      recordHistogram("browser", browserMs / 1000, {
-        provider: "cloudflare",
-        action: "snapshot",
-      });
-    }
-  }
-
-  const raw = await readBoundedText(res);
-  let data: CloudflareSnapshotResponse | null = null;
-  try {
-    data = JSON.parse(raw) as CloudflareSnapshotResponse;
-  } catch {
-    if (res.ok) {
-      throw new Error("Cloudflare Browser Run returned invalid JSON");
-    }
-  }
-
-  if (!res.ok) {
-    const detail = apiErrorDetail(data) ?? `${res.status} ${res.statusText}`;
-    throw new Error(`Cloudflare Browser Run error: ${detail}`);
-  }
-
-  if (!data?.success || !data.result) {
-    throw new Error(
-      apiErrorDetail(data) ??
-        "Cloudflare Browser Run returned no snapshot data",
-    );
-  }
-
-  const text = (data.result.markdown ?? "").slice(0, maxChars);
-  const html = data.result.content;
-  const title = data.meta?.title || url;
-
-  return { title, url, text, html };
 }

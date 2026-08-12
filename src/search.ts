@@ -8,6 +8,7 @@ import { normalizeHostname, recordSearchAppearance } from "./domain-db.js";
 import { applyDomainFilters } from "./domains.js";
 import { withSpan } from "./observability.js";
 import { expandQuery } from "./ollama.js";
+import { runSearxng } from "./provider-control.js";
 import type {
   SearxMeta,
   SearxResponse,
@@ -89,35 +90,47 @@ export async function searxSearchSingle(
   engines?: string,
   site?: string | string[],
 ): Promise<SearxSearchResult> {
-  return withSpan(
-    "searxng_request",
-    { "search.category": category, "search.time_range": timeRange },
-    async () => {
-      const params = new URLSearchParams({
-        q: siteFilterPrefix(site) + query,
-        format: "json",
-        categories: category,
-        pageno: "1",
-      });
-      if (timeRange) params.set("time_range", timeRange);
-      if (language) params.set("language", language);
-      // Arbitrary engine selection, forwarded verbatim. Unknown/disabled engine
-      // names degrade at SearXNG (empty results), matching how `category` fails
-      // soft rather than erroring.
-      if (engines) params.set("engines", engines);
+  const controlKey = JSON.stringify([
+    query,
+    category,
+    fetchCount,
+    timeRange ?? "",
+    language ?? "",
+    engines ?? "",
+    Array.isArray(site) ? site : (site ?? ""),
+  ]);
 
-      const res = await fetch(`${SEARXNG_URL}/search?${params}`, {
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!res.ok)
-        throw new Error(`SearXNG error: ${res.status} ${res.statusText}`);
+  return runSearxng(controlKey, () =>
+    withSpan(
+      "searxng_request",
+      { "search.category": category, "search.time_range": timeRange },
+      async () => {
+        const params = new URLSearchParams({
+          q: siteFilterPrefix(site) + query,
+          format: "json",
+          categories: category,
+          pageno: "1",
+        });
+        if (timeRange) params.set("time_range", timeRange);
+        if (language) params.set("language", language);
+        // Arbitrary engine selection, forwarded verbatim. Unknown/disabled engine
+        // names degrade at SearXNG (empty results), matching how `category` fails
+        // soft rather than erroring.
+        if (engines) params.set("engines", engines);
 
-      const data = (await res.json()) as SearxResponse;
-      return {
-        results: data.results.slice(0, fetchCount),
-        meta: normalizeSearxMeta(data),
-      };
-    },
+        const res = await fetch(`${SEARXNG_URL}/search?${params}`, {
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!res.ok)
+          throw new Error(`SearXNG error: ${res.status} ${res.statusText}`);
+
+        const data = (await res.json()) as SearxResponse;
+        return {
+          results: data.results.slice(0, fetchCount),
+          meta: normalizeSearxMeta(data),
+        };
+      },
+    ),
   );
 }
 

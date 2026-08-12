@@ -35,10 +35,13 @@ function targetSelectorScript(selector: string): string {
   return `(() => { const el = document.querySelector(${selectorLiteral}); if (!el) { document.body.replaceChildren(); return; } document.body.replaceChildren(el.cloneNode(true)); })();`;
 }
 
-function apiErrorDetail(data: CloudflareSnapshotResponse | null): string | null {
+function apiErrorDetail(
+  data: CloudflareSnapshotResponse | null,
+): string | null {
   const item = data?.errors?.[0] ?? data?.messages?.[0];
   if (!item) return null;
-  if (item.message && item.code !== undefined) return `${item.code} ${item.message}`;
+  if (item.message && item.code !== undefined)
+    return `${item.code} ${item.message}`;
   return item.message ?? (item.code !== undefined ? String(item.code) : null);
 }
 
@@ -72,7 +75,9 @@ export async function cloudflareSnapshot(
   // than interpolated as source, preserving fetch_url's existing
   // target_selector semantics without creating an injection primitive.
   if (tuning?.targetSelector) {
-    body.addScriptTag = [{ content: targetSelectorScript(tuning.targetSelector) }];
+    body.addScriptTag = [
+      { content: targetSelectorScript(tuning.targetSelector) },
+    ];
   }
 
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
@@ -114,7 +119,8 @@ export async function cloudflareSnapshot(
 
   if (!data?.success || !data.result) {
     throw new Error(
-      apiErrorDetail(data) ?? "Cloudflare Browser Run returned no snapshot data",
+      apiErrorDetail(data) ??
+        "Cloudflare Browser Run returned no snapshot data",
     );
   }
 

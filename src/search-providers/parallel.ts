@@ -50,7 +50,8 @@ export const parallelSearchProvider: HostedSearchProvider = {
       const includeDomains = siteList(request.site);
       const afterDate = timeRangeStartIso(request.timeRange)?.slice(0, 10);
       const sourcePolicy: Record<string, unknown> = {};
-      if (includeDomains.length > 0) sourcePolicy.include_domains = includeDomains;
+      if (includeDomains.length > 0)
+        sourcePolicy.include_domains = includeDomains;
       if (afterDate) sourcePolicy.after_date = afterDate;
 
       const advancedSettings: Record<string, unknown> = {

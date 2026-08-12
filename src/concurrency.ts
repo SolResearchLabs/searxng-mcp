@@ -43,7 +43,12 @@ export class BoundedSemaphore {
       throw new Error("queueTimeoutMs must be positive");
   }
 
-  snapshot(): { active: number; queued: number; maxInFlight: number; maxQueue: number } {
+  snapshot(): {
+    active: number;
+    queued: number;
+    maxInFlight: number;
+    maxQueue: number;
+  } {
     return {
       active: this.active,
       queued: this.queue.length,
@@ -133,7 +138,12 @@ export class TokenBucket {
     this.lastRefillMs = Date.now();
   }
 
-  snapshot(): { tokens: number; waiters: number; ratePerSecond: number; capacity: number } {
+  snapshot(): {
+    tokens: number;
+    waiters: number;
+    ratePerSecond: number;
+    capacity: number;
+  } {
     this.refill();
     return {
       tokens: this.tokens,

@@ -85,7 +85,7 @@ describe("Exa hosted search", () => {
 });
 
 describe("Parallel hosted search", () => {
-  it("uses v1 search and normalizes excerpts", async () => {
+  it("uses v1 search, strict source policy and normalized excerpts", async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         results: [
@@ -107,7 +107,9 @@ describe("Parallel hosted search", () => {
       site: "example.com",
     });
 
-    expect(mockFetch.mock.calls[0][0]).toBe("https://api.parallel.ai/v1/search");
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      "https://api.parallel.ai/v1/search",
+    );
     const options = mockFetch.mock.calls[0][1] as RequestInit;
     expect(options.headers).toMatchObject({
       "Content-Type": "application/json",
@@ -118,14 +120,34 @@ describe("Parallel hosted search", () => {
     expect(body.mode).toBe("basic");
     expect(body.max_chars_total).toBe(4800);
     expect(body.objective).toContain("current news");
-    expect(body.objective).toContain("last day");
-    expect(body.objective).toContain("example.com");
+    expect(body.advanced_settings.max_results).toBe(4);
+    expect(body.advanced_settings.source_policy.include_domains).toEqual([
+      "example.com",
+    ]);
+    expect(body.advanced_settings.source_policy.after_date).toMatch(
+      /^\d{4}-\d{2}-\d{2}$/,
+    );
     expect(results[0]).toMatchObject({
       url: "https://example.com/parallel",
       engine: "parallel",
       content: "excerpt one\nexcerpt two",
       publishedDate: "2026-08-11",
     });
+  });
+
+  it("accepts the current advanced mode override", async () => {
+    process.env.PARALLEL_SEARCH_MODE = "advanced";
+    mockFetch.mockResolvedValueOnce(jsonResponse({ results: [] }));
+
+    await parallelSearchProvider.search({
+      query: "complex research",
+      numResults: 5,
+      category: "general",
+    });
+
+    const options = mockFetch.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(String(options.body));
+    expect(body.mode).toBe("advanced");
   });
 });
 

@@ -1,6 +1,6 @@
 import { CircuitBreaker } from "./circuit-breaker.js";
 import { BoundedSemaphore, singleflight, TokenBucket } from "./concurrency.js";
-import { LocalLoadShedError, crawl4aiHostPressure } from "./host-pressure.js";
+import { crawl4aiHostPressure, LocalLoadShedError } from "./host-pressure.js";
 
 function positiveInt(name: string, fallback: number): number {
   const raw = process.env[name];

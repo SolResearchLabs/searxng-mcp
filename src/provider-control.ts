@@ -36,10 +36,7 @@ function circuit(
       `${prefix}_CIRCUIT_COOLDOWN_MS`,
       defaults.cooldownMs,
     ),
-    maxCooldownMs: positiveInt(
-      `${prefix}_CIRCUIT_MAX_COOLDOWN_MS`,
-      300_000,
-    ),
+    maxCooldownMs: positiveInt(`${prefix}_CIRCUIT_MAX_COOLDOWN_MS`, 300_000),
   });
 }
 
@@ -71,11 +68,10 @@ const cloudflareRate = new TokenBucket(
   nonNegativeInt("CLOUDFLARE_RATE_MAX_WAITERS", 24),
   positiveInt("CLOUDFLARE_RATE_MAX_WAIT_MS", 30_000),
 );
-const cloudflareCircuit = circuit(
-  "cloudflare-browser-run",
-  "CLOUDFLARE",
-  { failures: 5, cooldownMs: 30_000 },
-);
+const cloudflareCircuit = circuit("cloudflare-browser-run", "CLOUDFLARE", {
+  failures: 5,
+  cooldownMs: 30_000,
+});
 
 const crawl4aiGate = new BoundedSemaphore(
   "crawl4ai",

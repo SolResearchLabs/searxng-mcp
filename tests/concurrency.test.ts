@@ -61,7 +61,9 @@ describe("BoundedSemaphore", () => {
     const second = gate.run(async () => 2);
     await Promise.resolve();
 
-    await expect(gate.run(async () => 3)).rejects.toBeInstanceOf(QueueFullError);
+    await expect(gate.run(async () => 3)).rejects.toBeInstanceOf(
+      QueueFullError,
+    );
 
     hold.resolve();
     await first;

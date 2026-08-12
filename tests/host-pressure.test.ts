@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  HostPressureMonitor,
   classifyHostPressure,
-  parseProcMeminfo,
+  HostPressureMonitor,
   type HostPressureOptions,
+  parseProcMeminfo,
 } from "../src/host-pressure.js";
 
 const GiB = 1024 ** 3;
 
-function options(overrides?: Partial<HostPressureOptions>): HostPressureOptions {
+function options(
+  overrides?: Partial<HostPressureOptions>,
+): HostPressureOptions {
   return {
     enabled: true,
     softAvailablePercent: 25,
@@ -104,7 +106,10 @@ describe("HostPressureMonitor", () => {
       availableBytes: 8 * GiB,
       source: "node_os" as const,
     }));
-    const monitor = new HostPressureMonitor(options({ sampleTtlMs: 1000 }), sampler);
+    const monitor = new HostPressureMonitor(
+      options({ sampleTtlMs: 1000 }),
+      sampler,
+    );
 
     expect(monitor.snapshot(1000).state).toBe("normal");
     expect(monitor.snapshot(1500).state).toBe("normal");

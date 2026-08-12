@@ -81,6 +81,10 @@ export async function initObservability(): Promise<void> {
     histograms.fetch = meter.createHistogram("searxng_fetch_duration_seconds", {
       unit: "s",
     });
+    histograms.browser = meter.createHistogram(
+      "searxng_browser_duration_seconds",
+      { unit: "s" },
+    );
   } catch (err) {
     console.error(
       `[searxng-mcp] OTLP init failed: ${err instanceof Error ? err.message : String(err)}`,

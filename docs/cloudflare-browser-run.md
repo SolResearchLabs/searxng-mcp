@@ -157,7 +157,7 @@ Those remain later UltraSearch phases so the initial upstream delta stays review
 
 ## Validation baseline
 
-The feature branch was validated from the private `SolResearchLabs/UltraSearch` repository using its trusted self-hosted Ubuntu runner. The public fork does not need a self-hosted runner attached and does not need GitHub-hosted runner credits for this development lane.
+The feature branch was validated from the private `SolResearchLabs/UltraSearch` repository using its trusted self-hosted Ubuntu runner. The public fork is intentionally left without a self-hosted runner, and this lane does not depend on GitHub-hosted runner credits.
 
 ```text
 TypeScript: pass
@@ -167,6 +167,6 @@ Tests: 521 passed
 Type errors: none
 ```
 
-The private harness checks out only the explicitly pinned public feature branch and does not modify production containers or server configuration.
+The private harness is manual-only, checks out only the explicitly pinned public feature branch and does not modify production containers or server configuration.
 
 A live Cloudflare `/snapshot` request remains a deployment-time credential gate rather than a source-code validation dependency. It can be run later from the private control repository or another trusted environment with a narrowly scoped Browser Rendering token. No Cloudflare credential belongs in the public fork.

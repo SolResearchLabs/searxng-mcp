@@ -19,7 +19,7 @@ export interface TierSkipDecision {
 }
 
 export const TIER_NAME: Record<TierSlot, TierName> = {
-  tier1: "tier1_firecrawl",
+  tier1: "tier1_cloudflare",
   tier2: "tier2_crawl4ai",
   tier3: "tier3_rawfetch",
 };

@@ -48,7 +48,10 @@ export class CircuitBreaker {
     public readonly name: string,
     private readonly options: CircuitBreakerOptions,
   ) {
-    if (!Number.isInteger(options.failureThreshold) || options.failureThreshold < 1)
+    if (
+      !Number.isInteger(options.failureThreshold) ||
+      options.failureThreshold < 1
+    )
       throw new Error("failureThreshold must be a positive integer");
     if (!Number.isFinite(options.cooldownMs) || options.cooldownMs <= 0)
       throw new Error("cooldownMs must be positive");
@@ -159,7 +162,10 @@ export class CircuitBreaker {
     }
 
     this.consecutiveFailures += 1;
-    if (immediateOpen || this.consecutiveFailures >= this.options.failureThreshold) {
+    if (
+      immediateOpen ||
+      this.consecutiveFailures >= this.options.failureThreshold
+    ) {
       this.open(providerError?.retryAfterMs);
     }
   }

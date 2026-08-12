@@ -1,5 +1,9 @@
 import { CircuitBreaker } from "../circuit-breaker.js";
 import { BoundedSemaphore, singleflight } from "../concurrency.js";
+import {
+  HostedSearchBudgetError,
+  reserveHostedSearchBudget,
+} from "./budget.js";
 import type { HostedSearchProviderId } from "./types.js";
 
 function positiveInt(name: string, fallback: number): number {
@@ -50,8 +54,21 @@ export function runHostedSearchProvider<T>(
 ): Promise<T> {
   const control = controls[provider];
   return singleflight(`hosted-search:${provider}:${key}`, async () => {
+    // Keep known-unhealthy providers out of the queue. We check again after
+    // admission because another concurrent request may open the circuit while
+    // this caller is waiting for a provider slot.
     control.circuit.assertAvailable();
-    return control.gate.run(() => control.circuit.execute(fn));
+    return control.gate.run(async () => {
+      control.circuit.assertAvailable();
+
+      // Budget accounting sits outside circuit execution. An exhausted or
+      // unverifiable hard budget is an operator-routing condition, not evidence
+      // that the provider itself is unhealthy.
+      const budget = await reserveHostedSearchBudget(provider);
+      if (!budget.allowed) throw new HostedSearchBudgetError(provider, budget);
+
+      return control.circuit.execute(fn);
+    });
   });
 }
 

@@ -11,9 +11,10 @@ import { cacheAtomicUpdate, cacheGet } from "./cache.js";
 
 export const DOMAIN_RECORD_TTL_SECONDS = 90 * 24 * 60 * 60;
 // Bumped 4->5 because tier1 changed provider from Firecrawl to Cloudflare
-// Browser Run. Reusing Firecrawl success/failure history for Cloudflare would
-// poison data-driven routing decisions, so schema-4 records are intentionally
-// treated as stale and rebuilt fresh.
+// Browser Run. Schema-4 records are migrated on the next write: tier1 stats
+// are reset, while Crawl4AI/raw/Wayback/GitHub history and capability learning
+// are preserved. Reads continue to reject stale schemas until that migration
+// write occurs.
 export const SCHEMA_VERSION = 5;
 const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -122,6 +123,38 @@ function newRecord(domain: string, now: string): DomainRecord {
   };
 }
 
+function migrateSchema4Record(
+  parsed: DomainRecord,
+  domain: string,
+  now: string,
+): DomainRecord | null {
+  if (parsed.schema_version !== 4) return null;
+  const stats = parsed.tier_stats_30d;
+  if (
+    !stats?.tier1 ||
+    !stats.tier2 ||
+    !stats.tier3 ||
+    !stats.tier4 ||
+    !stats.github ||
+    !parsed.capabilities
+  ) {
+    return null;
+  }
+
+  return {
+    ...parsed,
+    schema_version: SCHEMA_VERSION,
+    domain,
+    last_fetch: now,
+    // Firecrawl's tier1 success/failure history is not comparable with the
+    // new Cloudflare provider. Preserve all other learned slots.
+    tier_stats_30d: {
+      ...stats,
+      tier1: emptyStat(),
+    },
+  };
+}
+
 export function normalizeHostname(input: string): string | null {
   try {
     // If `input` is a URL, pull the hostname; otherwise treat it as a hostname.
@@ -178,10 +211,11 @@ function updateRecord(
     if (raw) {
       try {
         const parsed = JSON.parse(raw) as DomainRecord;
-        record =
-          parsed.schema_version === SCHEMA_VERSION
-            ? parsed
-            : newRecord(hostname, now);
+        if (parsed.schema_version === SCHEMA_VERSION) {
+          record = parsed;
+        } else {
+          record = migrateSchema4Record(parsed, hostname, now) ?? newRecord(hostname, now);
+        }
       } catch {
         record = newRecord(hostname, now);
       }

@@ -39,6 +39,12 @@ export async function computeTierSkips(
   if (record) {
     for (const slot of ["tier1", "tier2", "tier3"] as const) {
       if (decisions.has(slot)) continue;
+
+      // Schema 4 predates the Tier-1 provider swap. Until a record has an
+      // explicit Cloudflare marker, its tier1 counters belong to Firecrawl
+      // and are not evidence that Cloudflare is a bad fit for this domain.
+      if (slot === "tier1" && record.tier1_provider !== "cloudflare") continue;
+
       const stat = record.tier_stats_30d[slot];
       if (stat.attempts < MIN_ATTEMPTS_FOR_DECISION) continue;
       const successRate = stat.ok / stat.attempts;

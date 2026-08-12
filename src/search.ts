@@ -9,7 +9,7 @@ import { applyDomainFilters } from "./domains.js";
 import { withSpan } from "./observability.js";
 import { expandQuery } from "./ollama.js";
 import { runSearxng } from "./provider-control.js";
-import { parseRetryAfterMs, ProviderHttpError } from "./provider-errors.js";
+import { ProviderHttpError, parseRetryAfterMs } from "./provider-errors.js";
 import type {
   SearxMeta,
   SearxResponse,

@@ -31,7 +31,7 @@ function stat(attempts: number, ok: number, fail: number) {
 
 function record(overrides: Partial<DomainRecord>): DomainRecord {
   return {
-    schema_version: 4,
+    schema_version: 5,
     domain: "example.com",
     first_seen: "2026-05-01T00:00:00Z",
     last_fetch: "2026-05-01T00:00:00Z",
@@ -48,8 +48,8 @@ function record(overrides: Partial<DomainRecord>): DomainRecord {
 }
 
 describe("Tier objects", () => {
-  it("tier1 has name=tier1_firecrawl and slot=tier1", () => {
-    expect(tier1.name).toBe("tier1_firecrawl");
+  it("tier1 has name=tier1_cloudflare and slot=tier1", () => {
+    expect(tier1.name).toBe("tier1_cloudflare");
     expect(tier1.slot).toBe("tier1");
   });
 

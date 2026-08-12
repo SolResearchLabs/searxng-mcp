@@ -9,6 +9,7 @@ import {
 import { getBlockList, urlMatchesDomain } from "./domains.js";
 import { events } from "./events.js";
 import { postExtract } from "./extractors/post-extract.js";
+import { classifyFetchFailure } from "./fetch-failure-classification.js";
 import {
   assertPublicUrl,
   type FetchTuning,
@@ -99,7 +100,22 @@ async function runTier<T extends TierResult | null>(
     return out;
   } catch (err) {
     const latency_ms = Date.now() - t0;
-    const reason = err instanceof Error ? err.message : "error";
+    const classified = classifyFetchFailure(err);
+
+    if (classified.disposition === "tier_skipped") {
+      incCounter("fetch", { tier, outcome: "skipped" });
+      recordHistogram("fetch", latency_ms / 1000, {
+        tier,
+        outcome: "skipped",
+      });
+      events.fetchTierSkipped({ url, tier, reason: classified.reason });
+      console.error(
+        `[searxng-mcp] fetch ${tier} skipped url=${url} reason=${classified.reason}`,
+      );
+      return null as T;
+    }
+
+    const reason = classified.reason;
     incCounter("fetch", { tier, outcome: "error" });
     recordHistogram("fetch", latency_ms / 1000, { tier, outcome: "error" });
     events.fetchTierMiss({ url, tier, reason, latency_ms });

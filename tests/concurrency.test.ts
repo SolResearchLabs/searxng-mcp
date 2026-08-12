@@ -70,6 +70,23 @@ describe("BoundedSemaphore", () => {
     await second;
   });
 
+  it("runIfAvailable never queues behind active work", async () => {
+    const gate = new BoundedSemaphore("provider", 1, 4, 500);
+    const hold = deferred<void>();
+
+    const first = gate.run(() => hold.promise);
+    await Promise.resolve();
+
+    await expect(gate.runIfAvailable(async () => 2)).rejects.toBeInstanceOf(
+      QueueFullError,
+    );
+    expect(gate.snapshot()).toMatchObject({ active: 1, queued: 0 });
+
+    hold.resolve();
+    await first;
+    await expect(gate.runIfAvailable(async () => 3)).resolves.toBe(3);
+  });
+
   it("removes a queued waiter when its timeout expires", async () => {
     vi.useFakeTimers();
     const gate = new BoundedSemaphore("provider", 1, 1, 100);

@@ -9,6 +9,7 @@ import { applyDomainFilters } from "./domains.js";
 import { withSpan } from "./observability.js";
 import { expandQuery } from "./ollama.js";
 import { runSearxng } from "./provider-control.js";
+import { parseRetryAfterMs, ProviderHttpError } from "./provider-errors.js";
 import type {
   SearxMeta,
   SearxResponse,
@@ -121,8 +122,14 @@ export async function searxSearchSingle(
         const res = await fetch(`${SEARXNG_URL}/search?${params}`, {
           signal: AbortSignal.timeout(10000),
         });
-        if (!res.ok)
-          throw new Error(`SearXNG error: ${res.status} ${res.statusText}`);
+        if (!res.ok) {
+          throw new ProviderHttpError(
+            "searxng",
+            res.status,
+            `SearXNG error: ${res.status} ${res.statusText}`,
+            parseRetryAfterMs(res.headers.get("Retry-After")),
+          );
+        }
 
         const data = (await res.json()) as SearxResponse;
         return {

@@ -11,6 +11,7 @@ import {
 } from "../fetch-utils.js";
 import { recordHistogram } from "../observability.js";
 import { runCloudflareQuickAction } from "../provider-control.js";
+import { ProviderHttpError, parseRetryAfterMs } from "../provider-errors.js";
 
 interface CloudflareApiMessage {
   code?: number;
@@ -126,7 +127,12 @@ export async function cloudflareSnapshot(
 
     if (!res.ok) {
       const detail = apiErrorDetail(data) ?? `${res.status} ${res.statusText}`;
-      throw new Error(`Cloudflare Browser Run error: ${detail}`);
+      throw new ProviderHttpError(
+        "cloudflare-browser-run",
+        res.status,
+        `Cloudflare Browser Run error: ${detail}`,
+        parseRetryAfterMs(res.headers.get("Retry-After")),
+      );
     }
 
     if (!data?.success || !data.result) {

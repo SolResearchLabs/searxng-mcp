@@ -10,6 +10,10 @@ import { withSpan } from "./observability.js";
 import { expandQuery } from "./ollama.js";
 import { runSearxng } from "./provider-control.js";
 import { ProviderHttpError, parseRetryAfterMs } from "./provider-errors.js";
+import {
+  hasUsefulPrimarySearch,
+  searchHostedFallback,
+} from "./search-providers/index.js";
 import type {
   SearxMeta,
   SearxResponse,
@@ -141,6 +145,71 @@ export async function searxSearchSingle(
   );
 }
 
+function hostedFallbackAllowed(engines?: string): boolean {
+  if (!engines) return true;
+  // An explicit SearXNG engine constraint is a caller instruction that hosted
+  // providers cannot faithfully reproduce. Preserve it unless an operator
+  // consciously opts into best-effort cross-provider fallback.
+  return ["1", "true", "yes", "on"].includes(
+    process.env.HOSTED_SEARCH_FALLBACK_WITH_ENGINE_FILTER?.trim().toLowerCase() ??
+      "",
+  );
+}
+
+async function primarySearchWithFallback(
+  query: string,
+  category: string,
+  fetchCount: number,
+  timeRange?: string,
+  language?: string,
+  engines?: string,
+  site?: string | string[],
+): Promise<SearxSearchResult> {
+  let primary: SearxSearchResult | null = null;
+  let primaryError: unknown;
+
+  try {
+    primary = await searxSearchSingle(
+      query,
+      category,
+      fetchCount,
+      timeRange,
+      language,
+      engines,
+      site,
+    );
+    if (hasUsefulPrimarySearch(primary.results.length, primary.meta)) {
+      return primary;
+    }
+  } catch (err) {
+    primaryError = err;
+  }
+
+  if (hostedFallbackAllowed(engines)) {
+    const fallback = await searchHostedFallback({
+      query,
+      numResults: fetchCount,
+      category,
+      timeRange,
+      language,
+      site,
+    });
+    if (fallback) {
+      // Preserve useful SearXNG direct-answer metadata when a live SearXNG
+      // request succeeded but its normal result list was too sparse.
+      return {
+        results: fallback.results,
+        meta: primary?.meta ?? fallback.meta,
+      };
+    }
+  }
+
+  if (primary) return primary;
+  throw primaryError instanceof Error
+    ? primaryError
+    : new Error("SearXNG search failed and no hosted fallback succeeded");
+}
+
 export async function searxSearch(
   query: string,
   category: string,
@@ -177,16 +246,18 @@ export async function searxSearch(
     }
   }
 
-  // Fetch more than needed so reranker has a larger pool to work with
+  // Fetch more than needed so reranker has a larger pool to work with.
   const fetchCount = Math.min(numResults * 3, 20);
 
   if (shouldExpand) {
-    // Run original query + expanded variants in parallel, merge, deduplicate by URL
+    // Only the original query is allowed to activate hosted fallback. Expanded
+    // variants remain SearXNG-only so one user request cannot multiply hosted
+    // search spend across query-rewrite variants.
     const [variants, original] = await Promise.all([
       withSpan("expand_query", { "query.expand": true }, () =>
         expandQuery(query),
       ),
-      searxSearchSingle(
+      primarySearchWithFallback(
         query,
         category,
         fetchCount,
@@ -232,7 +303,9 @@ export async function searxSearch(
       }
     }
 
-    // Cache only the original query results (not the expanded pool)
+    // Cache only the original-query result set, including a hosted fallback if
+    // one was needed. This prevents repeatedly spending hosted quota for the
+    // same query while keeping expanded-variant content out of the base cache.
     await cacheSet(
       key,
       JSON.stringify({ results: original.results, meta: original.meta }),
@@ -246,8 +319,7 @@ export async function searxSearch(
     };
   }
 
-  // Non-expanded path
-  const raw = await searxSearchSingle(
+  const raw = await primarySearchWithFallback(
     query,
     category,
     fetchCount,
@@ -257,7 +329,7 @@ export async function searxSearch(
     site,
   );
 
-  // Cache pre-filter results so domain config changes apply retroactively on cache hits
+  // Cache pre-filter results so domain config changes apply retroactively on cache hits.
   await cacheSet(
     key,
     JSON.stringify({ results: raw.results, meta: raw.meta }),

@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-const recordHistogram = vi.fn();
+const { recordHistogram } = vi.hoisted(() => ({
+  recordHistogram: vi.fn(),
+}));
 vi.mock("../../src/observability.js", () => ({ recordHistogram }));
 
 vi.mock("../../src/config.js", () => ({

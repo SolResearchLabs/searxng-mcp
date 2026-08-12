@@ -157,7 +157,7 @@ Those remain later UltraSearch phases so the initial upstream delta stays review
 
 ## Validation baseline
 
-Trusted validation on Node.js 22 after the Phase-1 adapter work:
+The feature branch was validated from the private `SolResearchLabs/UltraSearch` repository using its trusted self-hosted Ubuntu runner. The public fork does not need a self-hosted runner attached and does not need GitHub-hosted runner credits for this development lane.
 
 ```text
 TypeScript: pass
@@ -166,3 +166,7 @@ Test files: 49 passed
 Tests: 521 passed
 Type errors: none
 ```
+
+The private harness checks out only the explicitly pinned public feature branch and does not modify production containers or server configuration.
+
+A live Cloudflare `/snapshot` request remains a deployment-time credential gate rather than a source-code validation dependency. It can be run later from the private control repository or another trusted environment with a narrowly scoped Browser Rendering token. No Cloudflare credential belongs in the public fork.

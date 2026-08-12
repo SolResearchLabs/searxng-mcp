@@ -66,6 +66,25 @@ export class BoundedSemaphore {
     }
   }
 
+  /**
+   * Run only when a permit is immediately available. Existing queued work has
+   * priority; this method never jumps ahead of it. Used by degraded host-mode
+   * admission where starting one local browser is acceptable but accumulating
+   * more queued browser work is not.
+   */
+  async runIfAvailable<T>(fn: () => Promise<T> | T): Promise<T> {
+    if (this.active >= this.maxInFlight || this.queue.length > 0) {
+      throw new QueueFullError(this.name);
+    }
+
+    this.active += 1;
+    try {
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+
   private acquire(): Promise<void> {
     if (this.active < this.maxInFlight) {
       this.active += 1;

@@ -11,7 +11,8 @@ vi.mock("../../src/config.js", () => ({
 // behavior is tested separately so null/error adapter fixtures do not share
 // provider-health state across test cases.
 vi.mock("../../src/provider-control.js", () => ({
-  runCrawl4ai: async <T>(_key: string, fn: () => Promise<T>): Promise<T> => fn(),
+  runCrawl4ai: async <T>(_key: string, fn: () => Promise<T>): Promise<T> =>
+    fn(),
 }));
 
 const mockFetch = vi.fn();

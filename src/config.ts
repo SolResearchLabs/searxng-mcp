@@ -3,6 +3,11 @@ export const FIRECRAWL_URL =
   process.env.FIRECRAWL_URL ?? "http://localhost:3002";
 export const FIRECRAWL_API_KEY =
   process.env.FIRECRAWL_API_KEY ?? "placeholder-local";
+export const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
+export const CLOUDFLARE_BROWSER_API_TOKEN =
+  process.env.CLOUDFLARE_BROWSER_API_TOKEN ??
+  process.env.CLOUDFLARE_API_TOKEN ??
+  "";
 export const RERANKER_URL = process.env.RERANKER_URL ?? "http://localhost:8787";
 export const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 export const CACHE_URL =
@@ -28,6 +33,14 @@ function positiveIntEnv(name: string, fallback: number): number {
   const v = parseInt(raw, 10);
   return Number.isNaN(v) || v <= 0 ? fallback : v;
 }
+
+// Cloudflare Browser Run Quick Actions are bounded by Cloudflare's browser
+// timeout. Keep the local abort at or below 60s so a wedged request cannot hold
+// an MCP turn indefinitely even if the upstream API changes its defaults.
+export const CLOUDFLARE_BROWSER_TIMEOUT_MS = Math.min(
+  positiveIntEnv("CLOUDFLARE_BROWSER_TIMEOUT_MS", 30_000),
+  60_000,
+);
 
 // Valkey cache client resilience (see src/cache.ts). A CPU-spiked dragonfly
 // still answers its ping healthcheck but stalls on real commands; cacheGet() is

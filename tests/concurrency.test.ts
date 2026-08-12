@@ -79,9 +79,10 @@ describe("BoundedSemaphore", () => {
     await Promise.resolve();
     const queued = gate.run(async () => 2);
     await Promise.resolve();
+    const rejected = expect(queued).rejects.toBeInstanceOf(QueueTimeoutError);
 
     await vi.advanceTimersByTimeAsync(100);
-    await expect(queued).rejects.toBeInstanceOf(QueueTimeoutError);
+    await rejected;
     expect(gate.snapshot()).toMatchObject({ active: 1, queued: 0 });
 
     hold.resolve();

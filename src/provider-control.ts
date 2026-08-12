@@ -53,10 +53,7 @@ const crawl4aiGate = new BoundedSemaphore(
   positiveInt("CRAWL4AI_QUEUE_TIMEOUT_MS", 5000),
 );
 
-export function runSearxng<T>(
-  key: string,
-  fn: () => Promise<T>,
-): Promise<T> {
+export function runSearxng<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return singleflight(`searxng:${key}`, () => searxngGate.run(fn));
 }
 
@@ -72,10 +69,7 @@ export function runCloudflareQuickAction<T>(
   });
 }
 
-export function runCrawl4ai<T>(
-  key: string,
-  fn: () => Promise<T>,
-): Promise<T> {
+export function runCrawl4ai<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return singleflight(`crawl4ai:${key}`, () => crawl4aiGate.run(fn));
 }
 

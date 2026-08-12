@@ -14,6 +14,15 @@ vi.mock("../../src/config.js", () => ({
   CLOUDFLARE_BROWSER_TIMEOUT_MS: 30_000,
 }));
 
+// Adapter tests validate Cloudflare request/response mapping. Provider bulkheads,
+// rate limiting and singleflight have their own focused tests.
+vi.mock("../../src/provider-control.js", () => ({
+  runCloudflareQuickAction: async <T>(
+    _key: string,
+    fn: () => Promise<T>,
+  ): Promise<T> => fn(),
+}));
+
 import { cloudflareSnapshot } from "../../src/tiers/cloudflare.js";
 
 beforeEach(() => {

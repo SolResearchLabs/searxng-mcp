@@ -2,6 +2,7 @@ import { ProviderHttpError, parseRetryAfterMs } from "../provider-errors.js";
 import type { SearxResult } from "../types.js";
 import { runHostedSearchProvider } from "./control.js";
 import type { HostedSearchProvider, HostedSearchRequest } from "./types.js";
+import { clampResults, siteList, timeRangeStartIso } from "./utils.js";
 
 interface ParallelResult {
   url?: string;
@@ -18,9 +19,11 @@ function apiKey(): string | undefined {
   return process.env.PARALLEL_API_KEY?.trim() || undefined;
 }
 
-function mode(): "turbo" | "basic" | "advanced" {
+function mode(): "basic" | "advanced" {
   const value = process.env.PARALLEL_SEARCH_MODE?.trim();
-  if (value === "turbo" || value === "advanced") return value;
+  if (value === "advanced") return value;
+  // UltraSearch intentionally favors the lower-latency v1 mode for a fallback
+  // provider. Operators can select the higher-quality default explicitly.
   return "basic";
 }
 
@@ -28,8 +31,8 @@ export const parallelSearchProvider: HostedSearchProvider = {
   id: "parallel",
   capabilities: {
     semantic: true,
-    recency: false,
-    domains: false,
+    recency: true,
+    domains: true,
     news: true,
   },
   configured: () => Boolean(apiKey()),
@@ -40,20 +43,21 @@ export const parallelSearchProvider: HostedSearchProvider = {
     const controlKey = JSON.stringify(request);
     return runHostedSearchProvider("parallel", controlKey, async () => {
       const objectiveParts = [request.query];
-      if (request.category === "news")
+      if (request.category === "news") {
         objectiveParts.push("Prefer current news and recent primary sources.");
-      if (request.timeRange)
-        objectiveParts.push(
-          `Prefer sources from the last ${request.timeRange}.`,
-        );
-      if (request.site) {
-        const sites = (
-          Array.isArray(request.site) ? request.site : [request.site]
-        )
-          .map((value) => value.trim())
-          .filter(Boolean);
-        if (sites.length > 0)
-          objectiveParts.push(`Prefer sources from: ${sites.join(", ")}.`);
+      }
+
+      const includeDomains = siteList(request.site);
+      const afterDate = timeRangeStartIso(request.timeRange)?.slice(0, 10);
+      const sourcePolicy: Record<string, unknown> = {};
+      if (includeDomains.length > 0) sourcePolicy.include_domains = includeDomains;
+      if (afterDate) sourcePolicy.after_date = afterDate;
+
+      const advancedSettings: Record<string, unknown> = {
+        max_results: clampResults(request.numResults, 20),
+      };
+      if (Object.keys(sourcePolicy).length > 0) {
+        advancedSettings.source_policy = sourcePolicy;
       }
 
       const res = await fetch("https://api.parallel.ai/v1/search", {
@@ -67,6 +71,7 @@ export const parallelSearchProvider: HostedSearchProvider = {
           search_queries: [request.query],
           mode: mode(),
           max_chars_total: Math.max(2000, request.numResults * 1200),
+          advanced_settings: advancedSettings,
         }),
         signal: AbortSignal.timeout(15_000),
       });

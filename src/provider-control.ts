@@ -1,5 +1,9 @@
 import { CircuitBreaker } from "./circuit-breaker.js";
 import { BoundedSemaphore, singleflight, TokenBucket } from "./concurrency.js";
+import {
+  LocalLoadShedError,
+  crawl4aiHostPressure,
+} from "./host-pressure.js";
 
 function positiveInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -108,15 +112,32 @@ export function runCloudflareQuickAction<T>(
 
 export function runCrawl4ai<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return singleflight(`crawl4ai:${key}`, async () => {
+    const pressure = crawl4aiHostPressure.snapshot();
+    if (pressure.state === "critical") {
+      throw new LocalLoadShedError(
+        pressure.state,
+        pressure.availablePercent,
+        pressure.availableMb,
+      );
+    }
+
     crawl4aiCircuit.assertAvailable();
-    return crawl4aiGate.run(() =>
+    const execute = () =>
       crawl4aiCircuit.execute(fn, {
         // Crawl4AI uses null as its established "could not produce content"
         // result. Count that toward local-provider health without changing the
         // existing adapter contract seen by the fetch cascade.
         isFailureResult: (result) => result === null,
-      }),
-    );
+      });
+
+    // Under degraded host memory, one local-browser operation may start only
+    // if the slot is immediately free. New queueing is shed so a temporary
+    // Cloudflare outage cannot build a backlog of future Chromium work.
+    if (pressure.state === "degraded") {
+      return crawl4aiGate.runIfAvailable(execute);
+    }
+
+    return crawl4aiGate.run(execute);
   });
 }
 
@@ -134,6 +155,7 @@ export function providerControlSnapshot() {
     crawl4ai: {
       ...crawl4aiGate.snapshot(),
       circuit: crawl4aiCircuit.snapshot(),
+      hostPressure: crawl4aiHostPressure.snapshot(),
     },
   };
 }

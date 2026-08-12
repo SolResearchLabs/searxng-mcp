@@ -43,9 +43,13 @@ export const parallelSearchProvider: HostedSearchProvider = {
       if (request.category === "news")
         objectiveParts.push("Prefer current news and recent primary sources.");
       if (request.timeRange)
-        objectiveParts.push(`Prefer sources from the last ${request.timeRange}.`);
+        objectiveParts.push(
+          `Prefer sources from the last ${request.timeRange}.`,
+        );
       if (request.site) {
-        const sites = (Array.isArray(request.site) ? request.site : [request.site])
+        const sites = (
+          Array.isArray(request.site) ? request.site : [request.site]
+        )
           .map((value) => value.trim())
           .filter(Boolean);
         if (sites.length > 0)

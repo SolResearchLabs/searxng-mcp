@@ -10,15 +10,15 @@
 import { cacheAtomicUpdate, cacheGet } from "./cache.js";
 
 export const DOMAIN_RECORD_TTL_SECONDS = 90 * 24 * 60 * 60;
-// Bumped 3->4 to add the `github` fast-path slot to tier_stats_30d (SXNG-10 —
-// GitHub fetches previously bypassed runTier() and recorded no tier stats).
-// Existing records on schema 3 are treated as stale and rebuilt fresh (see
-// updateRecord), same migration approach used for the 1->2 and 2->3 bumps.
-export const SCHEMA_VERSION = 4;
+// Bumped 4->5 because tier1 changed provider from Firecrawl to Cloudflare
+// Browser Run. Reusing Firecrawl success/failure history for Cloudflare would
+// poison data-driven routing decisions, so schema-4 records are intentionally
+// treated as stale and rebuilt fresh.
+export const SCHEMA_VERSION = 5;
 const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type TierName =
-  | "tier1_firecrawl"
+  | "tier1_cloudflare"
   | "tier2_crawl4ai"
   | "tier3_rawfetch"
   | "tier4_wayback"
@@ -198,7 +198,7 @@ const TIER_KEY: Record<
   TierName,
   "tier1" | "tier2" | "tier3" | "tier4" | "github"
 > = {
-  tier1_firecrawl: "tier1",
+  tier1_cloudflare: "tier1",
   tier2_crawl4ai: "tier2",
   tier3_rawfetch: "tier3",
   tier4_wayback: "tier4",

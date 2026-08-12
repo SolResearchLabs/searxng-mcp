@@ -25,7 +25,7 @@ function stat(attempts: number, ok: number, fail: number) {
 
 function record(overrides: Partial<DomainRecord>): DomainRecord {
   return {
-    schema_version: 5,
+    schema_version: 4,
     domain: "example.com",
     first_seen: "2026-05-01T00:00:00Z",
     last_fetch: "2026-05-01T00:00:00Z",
@@ -37,6 +37,7 @@ function record(overrides: Partial<DomainRecord>): DomainRecord {
       tier4: stat(0, 0, 0),
       github: stat(0, 0, 0),
     },
+    tier1_provider: "cloudflare",
     ...overrides,
   };
 }
@@ -68,7 +69,7 @@ describe("computeTierSkips", () => {
     expect(skips).toEqual([]);
   });
 
-  it("skips tier1 when success rate < 30% over >=10 attempts", async () => {
+  it("skips tier1 when Cloudflare success rate < 30% over >=10 attempts", async () => {
     cacheGetMock.mockResolvedValue(
       JSON.stringify(
         record({
@@ -84,6 +85,25 @@ describe("computeTierSkips", () => {
     );
     const skips = await computeTierSkips("https://example.com/p");
     expect(skips).toEqual([{ tier: "tier1", reason: "low_success_rate" }]);
+  });
+
+  it("ignores legacy unmarked tier1 stats from the Firecrawl provider", async () => {
+    cacheGetMock.mockResolvedValue(
+      JSON.stringify(
+        record({
+          tier1_provider: undefined,
+          tier_stats_30d: {
+            tier1: stat(50, 1, 49),
+            tier2: stat(0, 0, 0),
+            tier3: stat(0, 0, 0),
+            tier4: stat(0, 0, 0),
+            github: stat(0, 0, 0),
+          },
+        }),
+      ),
+    );
+
+    expect(await computeTierSkips("https://example.com/p")).toEqual([]);
   });
 
   it("does not skip when success rate is at or above 30%", async () => {

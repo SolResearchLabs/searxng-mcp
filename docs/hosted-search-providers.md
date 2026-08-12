@@ -185,17 +185,24 @@ Optional mode:
 PARALLEL_SEARCH_MODE=basic
 ```
 
-Accepted UltraSearch values:
+Accepted UltraSearch values for the current `/v1/search` API:
 
 ```text
-turbo
 basic
 advanced
 ```
 
-Default is `basic`.
+Parallel's current v1 documentation describes `advanced` as the API default and `basic` as the lower-latency mode. UltraSearch intentionally sends `basic` by default because Parallel is being used as a fallback inside an interactive search loop; operators can explicitly choose `advanced` when higher retrieval quality is worth additional latency.
 
-UltraSearch sends the original query as a search query and builds an objective from the user's request context. News, time-range and site preferences are expressed as objective guidance in this first adapter rather than falsely claiming strict provider-side filtering where the current adapter does not implement it.
+Older Parallel migration documentation for `/v1beta/search` may mention different mode names. UltraSearch targets the current `/v1/search` endpoint and follows its current Search Modes contract.
+
+UltraSearch sends the original query through `search_queries` and a self-contained objective. For constraints that Parallel v1 supports structurally, the adapter uses `advanced_settings` rather than merely hinting in prose:
+
+- site restrictions map to `advanced_settings.source_policy.include_domains`;
+- UltraSearch time-range presets map to `advanced_settings.source_policy.after_date`;
+- requested result count maps to `advanced_settings.max_results`, capped at 20.
+
+News intent is retained in the objective because it is a relevance preference rather than a strict domain/date constraint.
 
 Parallel excerpts are normalized into the search result content field.
 

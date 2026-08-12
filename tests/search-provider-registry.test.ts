@@ -15,6 +15,42 @@ const providers = vi.hoisted(() => ({
   },
 }));
 
+const budgets = vi.hoisted(() => ({
+  getStatus: vi.fn(),
+}));
+
+vi.mock("../src/search-providers/budget.js", () => {
+  class HostedSearchBudgetError extends Error {
+    constructor(
+      public readonly provider: string,
+      public readonly budget: { state: string },
+    ) {
+      super(`${provider} search budget is exhausted`);
+      this.name = "HostedSearchBudgetError";
+    }
+  }
+
+  return {
+    getHostedSearchBudgetStatus: budgets.getStatus,
+    HostedSearchBudgetError,
+    budgetRoutingRank: (state: string) => {
+      switch (state) {
+        case "disabled":
+        case "healthy":
+          return 0;
+        case "near_limit":
+          return 1;
+        case "unknown":
+          return 2;
+        case "exhausted":
+          return 3;
+        default:
+          return 99;
+      }
+    },
+  };
+});
+
 vi.mock("../src/search-providers/exa.js", () => ({
   exaSearchProvider: {
     id: "exa",
@@ -29,8 +65,8 @@ vi.mock("../src/search-providers/parallel.js", () => ({
     id: "parallel",
     capabilities: {
       semantic: true,
-      recency: false,
-      domains: false,
+      recency: true,
+      domains: true,
       news: true,
     },
     configured: providers.parallel.configured,
@@ -71,6 +107,26 @@ const result = (url: string, engine: string) => ({
   engines: [engine],
 });
 
+function budgetStatus(
+  provider: string,
+  state: "disabled" | "healthy" | "near_limit" | "exhausted" | "unknown",
+  allowed = state !== "exhausted" && state !== "unknown",
+) {
+  return {
+    provider,
+    state,
+    allowed,
+    usedUnits: state === "near_limit" ? 85 : state === "exhausted" ? 100 : 0,
+    limitUnits: state === "disabled" ? undefined : 100,
+    remainingUnits:
+      state === "disabled" ? undefined : state === "near_limit" ? 15 : 100,
+    warnPercent: 80,
+    period: "2026-08",
+    resetAt: "2026-09-01T00:00:00.000Z",
+    failOpen: false,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.HOSTED_SEARCH_PROVIDER_ORDER;
@@ -81,6 +137,9 @@ beforeEach(() => {
   providers.exa.search.mockResolvedValue([]);
   providers.parallel.search.mockResolvedValue([]);
   providers.brave.search.mockResolvedValue([]);
+  budgets.getStatus.mockImplementation(async (provider: string) =>
+    budgetStatus(provider, "disabled"),
+  );
 });
 
 describe("hosted search registry", () => {
@@ -100,8 +159,8 @@ describe("hosted search registry", () => {
     expect(providers.brave.search).not.toHaveBeenCalled();
     expect(fallback?.provider).toBe("parallel");
     expect(fallback?.attempts).toEqual([
-      { provider: "exa", outcome: "empty" },
-      { provider: "parallel", outcome: "hit" },
+      { provider: "exa", outcome: "empty", budgetState: "disabled" },
+      { provider: "parallel", outcome: "hit", budgetState: "disabled" },
     ]);
   });
 
@@ -117,6 +176,7 @@ describe("hosted search registry", () => {
     expect(fallback?.attempts[0]).toMatchObject({
       provider: "exa",
       outcome: "error",
+      budgetState: "disabled",
       error: "exa unavailable",
     });
   });
@@ -146,6 +206,48 @@ describe("hosted search registry", () => {
 
     expect(fallback?.provider).toBe("brave");
     expect(providers.brave.search).toHaveBeenCalledTimes(1);
+    expect(providers.exa.search).not.toHaveBeenCalled();
+  });
+
+  it("moves a near-limit provider behind healthier-budget providers", async () => {
+    budgets.getStatus.mockImplementation(async (provider: string) =>
+      budgetStatus(provider, provider === "exa" ? "near_limit" : "healthy"),
+    );
+    providers.parallel.search.mockResolvedValueOnce([
+      result("https://parallel.test", "parallel"),
+    ]);
+
+    const fallback = await searchHostedFallback(request);
+
+    expect(fallback?.provider).toBe("parallel");
+    expect(providers.parallel.search).toHaveBeenCalledTimes(1);
+    expect(providers.exa.search).not.toHaveBeenCalled();
+  });
+
+  it("never calls a provider whose hard budget is exhausted", async () => {
+    budgets.getStatus.mockImplementation(async (provider: string) =>
+      budgetStatus(provider, provider === "exa" ? "exhausted" : "healthy"),
+    );
+
+    const fallback = await searchHostedFallback(request);
+
+    expect(fallback).toBeNull();
+    expect(providers.exa.search).not.toHaveBeenCalled();
+    expect(providers.parallel.search).toHaveBeenCalledTimes(1);
+    expect(providers.brave.search).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips unknown budget health when fail-open is not enabled", async () => {
+    budgets.getStatus.mockImplementation(async (provider: string) =>
+      budgetStatus(provider, provider === "exa" ? "unknown" : "healthy", false),
+    );
+    providers.parallel.search.mockResolvedValueOnce([
+      result("https://parallel.test", "parallel"),
+    ]);
+
+    const fallback = await searchHostedFallback(request);
+
+    expect(fallback?.provider).toBe("parallel");
     expect(providers.exa.search).not.toHaveBeenCalled();
   });
 

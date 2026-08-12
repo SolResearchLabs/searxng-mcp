@@ -94,12 +94,15 @@ export async function cloudflareSnapshot(
     signal: AbortSignal.timeout(CLOUDFLARE_BROWSER_TIMEOUT_MS),
   });
 
-  const browserMs = Number(res.headers.get("X-Browser-Ms-Used"));
-  if (Number.isFinite(browserMs) && browserMs >= 0) {
-    recordHistogram("browser", browserMs / 1000, {
-      provider: "cloudflare",
-      action: "snapshot",
-    });
+  const browserMsHeader = res.headers.get("X-Browser-Ms-Used");
+  if (browserMsHeader !== null) {
+    const browserMs = Number(browserMsHeader);
+    if (Number.isFinite(browserMs) && browserMs >= 0) {
+      recordHistogram("browser", browserMs / 1000, {
+        provider: "cloudflare",
+        action: "snapshot",
+      });
+    }
   }
 
   const raw = await readBoundedText(res);

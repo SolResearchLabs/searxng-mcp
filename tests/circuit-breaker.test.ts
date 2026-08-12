@@ -1,11 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CircuitBreaker, CircuitOpenError } from "../src/circuit-breaker.js";
 import {
-  CircuitBreaker,
-  CircuitOpenError,
-} from "../src/circuit-breaker.js";
-import {
-  parseRetryAfterMs,
   ProviderHttpError,
+  parseRetryAfterMs,
 } from "../src/provider-errors.js";
 
 afterEach(() => {
@@ -82,9 +79,9 @@ describe("CircuitBreaker", () => {
     await Promise.resolve();
 
     expect(circuit.snapshot()).toMatchObject({ state: "half_open" });
-    await expect(circuit.execute(async () => "second probe")).rejects.toBeInstanceOf(
-      CircuitOpenError,
-    );
+    await expect(
+      circuit.execute(async () => "second probe"),
+    ).rejects.toBeInstanceOf(CircuitOpenError);
 
     hold.resolve("recovered");
     await expect(probe).resolves.toBe("recovered");
@@ -126,12 +123,7 @@ describe("CircuitBreaker", () => {
 
     await expect(
       circuit.execute(async () => {
-        throw new ProviderHttpError(
-          "provider",
-          429,
-          "rate limited",
-          5000,
-        );
+        throw new ProviderHttpError("provider", 429, "rate limited", 5000);
       }),
     ).rejects.toThrow("rate limited");
 

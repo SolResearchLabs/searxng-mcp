@@ -14,6 +14,10 @@ const CONFIG_ENV = [
   "CACHE_MAX_RETRIES_PER_REQUEST",
   "HTTP_SESSION_IDLE_TIMEOUT_MS",
   "HTTP_MAX_SESSIONS",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_BROWSER_API_TOKEN",
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_BROWSER_TIMEOUT_MS",
 ];
 
 function clearConfigEnv() {
@@ -52,6 +56,50 @@ describe("CACHE_URL alias fallback chain", () => {
     process.env.REDIS_URL = "redis://redis-wins:3";
     const { CACHE_URL } = await import("../src/config.js");
     expect(CACHE_URL).toBe("redis://redis-wins:3");
+  });
+});
+
+describe("Cloudflare Browser Run config", () => {
+  it("defaults credentials to empty strings and timeout to 30000ms", async () => {
+    const {
+      CLOUDFLARE_ACCOUNT_ID,
+      CLOUDFLARE_BROWSER_API_TOKEN,
+      CLOUDFLARE_BROWSER_TIMEOUT_MS,
+    } = await import("../src/config.js");
+    expect(CLOUDFLARE_ACCOUNT_ID).toBe("");
+    expect(CLOUDFLARE_BROWSER_API_TOKEN).toBe("");
+    expect(CLOUDFLARE_BROWSER_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it("prefers the Browser Run-specific token over the generic Cloudflare token", async () => {
+    process.env.CLOUDFLARE_BROWSER_API_TOKEN = "browser-token";
+    process.env.CLOUDFLARE_API_TOKEN = "generic-token";
+    const { CLOUDFLARE_BROWSER_API_TOKEN } = await import("../src/config.js");
+    expect(CLOUDFLARE_BROWSER_API_TOKEN).toBe("browser-token");
+  });
+
+  it("falls back to the generic Cloudflare token", async () => {
+    process.env.CLOUDFLARE_API_TOKEN = "generic-token";
+    const { CLOUDFLARE_BROWSER_API_TOKEN } = await import("../src/config.js");
+    expect(CLOUDFLARE_BROWSER_API_TOKEN).toBe("generic-token");
+  });
+
+  it("parses a custom Browser Run timeout", async () => {
+    process.env.CLOUDFLARE_BROWSER_TIMEOUT_MS = "45000";
+    const { CLOUDFLARE_BROWSER_TIMEOUT_MS } = await import("../src/config.js");
+    expect(CLOUDFLARE_BROWSER_TIMEOUT_MS).toBe(45_000);
+  });
+
+  it("caps Browser Run timeout at 60000ms", async () => {
+    process.env.CLOUDFLARE_BROWSER_TIMEOUT_MS = "120000";
+    const { CLOUDFLARE_BROWSER_TIMEOUT_MS } = await import("../src/config.js");
+    expect(CLOUDFLARE_BROWSER_TIMEOUT_MS).toBe(60_000);
+  });
+
+  it("falls back to 30000ms for an invalid Browser Run timeout", async () => {
+    process.env.CLOUDFLARE_BROWSER_TIMEOUT_MS = "nope";
+    const { CLOUDFLARE_BROWSER_TIMEOUT_MS } = await import("../src/config.js");
+    expect(CLOUDFLARE_BROWSER_TIMEOUT_MS).toBe(30_000);
   });
 });
 

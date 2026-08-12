@@ -53,7 +53,10 @@ const result = (url: string, engine = "google") => ({
   engines: [engine],
 });
 
-function searxResponse(results: unknown[], extras: Record<string, unknown> = {}) {
+function searxResponse(
+  results: unknown[],
+  extras: Record<string, unknown> = {},
+) {
   return new Response(JSON.stringify({ results, ...extras }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
@@ -68,7 +71,9 @@ beforeEach(() => {
 
 describe("SearXNG hosted fallback policy", () => {
   it("does not call hosted search when SearXNG returns useful results", async () => {
-    mockFetch.mockResolvedValueOnce(searxResponse([result("https://searx.test") ]));
+    mockFetch.mockResolvedValueOnce(
+      searxResponse([result("https://searx.test")]),
+    );
 
     const search = await searxSearch("query", "general", 5);
 

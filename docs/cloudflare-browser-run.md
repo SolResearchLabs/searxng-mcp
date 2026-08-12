@@ -30,12 +30,7 @@ The Browser Run `/snapshot` Quick Action can return multiple representations fro
 }
 ```
 
-This gives the existing fetch pipeline both:
-
-- rendered HTML for post-extraction/title/metadata logic;
-- rendered Markdown for the primary returned text.
-
-That maps directly onto the upstream `TierResult` contract without introducing a second browser request.
+This gives the existing fetch pipeline both rendered HTML for post-extraction/title/metadata logic and rendered Markdown for the primary returned text. That maps directly onto the upstream `TierResult` contract without introducing a second browser request.
 
 ## Configuration
 
@@ -54,9 +49,7 @@ Optional:
 CLOUDFLARE_BROWSER_TIMEOUT_MS=30000
 ```
 
-The default is 30 seconds. Values above 60 seconds are capped at 60 seconds locally.
-
-The API token must be scoped to the intended Cloudflare account and have the Browser Rendering / Browser Run edit permission required by the REST Quick Actions API.
+The default is 30 seconds. Values above 60 seconds are capped at 60 seconds locally. The API token must be scoped to the intended Cloudflare account and have the Browser Rendering / Browser Run edit permission required by the REST Quick Actions API.
 
 Do not commit the token to this repository. Production credentials belong in the private deployment/control-plane configuration.
 
@@ -120,16 +113,7 @@ Crawl4AI, raw, Wayback, GitHub and capability history remain intact. This avoids
 
 ## Failure behavior
 
-Cloudflare errors do not terminate a normal page fetch. The existing tier wrapper records the failure and continues through the cascade.
-
-Examples include:
-
-- missing configuration;
-- request timeout;
-- Cloudflare API non-2xx response;
-- invalid JSON;
-- successful API envelope with no snapshot result;
-- empty Markdown result.
+Cloudflare errors do not terminate a normal page fetch. The existing tier wrapper records the failure and continues through the cascade. This includes missing configuration, request timeout, Cloudflare API errors, invalid JSON, an empty snapshot envelope and empty Markdown.
 
 The adapter reads the API response through the existing bounded-response helper before parsing JSON.
 
@@ -137,21 +121,21 @@ The adapter reads the API response through the existing bounded-response helper 
 
 Included now:
 
-- `/snapshot` single-page retrieval;
-- rendered HTML + Markdown;
-- selector tuning;
-- browser-time telemetry;
-- provider-aware Tier-1 domain learning;
-- unit and integration-contract tests.
+- `/snapshot` single-page retrieval
+- rendered HTML + Markdown
+- selector tuning
+- browser-time telemetry
+- provider-aware Tier-1 domain learning
+- unit and integration-contract tests
 
 Not included yet:
 
-- Cloudflare `/crawl`;
-- Cloudflare request token bucket / concurrency controller;
-- circuit breakers;
-- queue admission;
-- hosted search-provider fallback pool;
-- LibreChat deployment configuration.
+- Cloudflare `/crawl`
+- Cloudflare request token bucket / concurrency controller
+- circuit breakers
+- queue admission
+- hosted search-provider fallback pool
+- LibreChat deployment configuration
 
 Those remain later UltraSearch phases so the initial upstream delta stays reviewable and merge-friendly.
 
@@ -167,6 +151,6 @@ Tests: 521 passed
 Type errors: none
 ```
 
-The private harness is manual-only, checks out only the explicitly pinned public feature branch and does not modify production containers or server configuration.
+The private validation harness is manual-only. It checks out only the explicitly pinned public feature branch and does not modify production containers or server configuration.
 
 A live Cloudflare `/snapshot` request remains a deployment-time credential gate rather than a source-code validation dependency. It can be run later from the private control repository or another trusted environment with a narrowly scoped Browser Rendering token. No Cloudflare credential belongs in the public fork.

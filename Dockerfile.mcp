@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1
+# UltraSearch MCP server image — builds @tadmstr/searxng-mcp (feature/cloudflare-crawl
+# fork). GIT_SHA build arg stamps the built revision; the deployment compose
+# defaults it to the pinned deployable SHA.
+#
+# Generic build/runtime infrastructure for the public MCP source: no secrets, no
+# private-registry references, no production-host assumptions.
+#
+# Notes:
+#   - pnpm 10 blocks dependency build scripts by default. `--ignore-scripts` is
+#     the reproducible choice here: the only blocked script in the tree is
+#     protobufjs's postinstall, which is a no-op version-scheme diagnostic (its
+#     dist ships prebuilt). Nothing in production needs a build step, so an
+#     onlyBuiltDependencies allowlist is unnecessary.
+#   - `domains.json` is read at runtime from the repo root (src/domains.ts
+#     resolves ../../domains.json from build/src/), so it is copied in.
+#   - version.ts walks up to the nearest package.json at startup — retained.
+
+ARG GIT_SHA=unknown
+
+FROM node:22-bookworm-slim AS build
+ARG GIT_SHA
+WORKDIR /app
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --ignore-scripts
+COPY tsconfig.json ./
+COPY src ./src
+RUN pnpm build
+RUN printf '%s\n' "${GIT_SHA}" > /app/build/git-sha.txt
+
+FROM node:22-bookworm-slim AS runtime
+ARG GIT_SHA
+WORKDIR /app
+ENV NODE_ENV=production
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts
+COPY --from=build /app/build ./build
+COPY domains.json ./domains.json
+RUN chown -R node:node /app
+USER node
+EXPOSE 3001
+LABEL org.opencontainers.image.source="https://github.com/SolResearchLabs/searxng-mcp" \
+      org.opencontainers.image.revision="${GIT_SHA}"
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
+  CMD node -e "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+ENTRYPOINT ["node", "build/src/index.js"]

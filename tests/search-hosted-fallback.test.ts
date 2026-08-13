@@ -68,11 +68,24 @@ beforeEach(() => {
   mockFetch.mockReset();
   hosted.searchHostedFallback.mockReset();
   delete process.env.HOSTED_SEARCH_FALLBACK_WITH_ENGINE_FILTER;
+  delete process.env.HOSTED_SEARCH_FALLBACK_ENABLED;
   hosted.searchHostedFallback.mockResolvedValue(null);
 });
 
 describe("SearXNG hosted fallback policy", () => {
   it("does not call hosted search when SearXNG returns useful results", async () => {
+    mockFetch.mockResolvedValueOnce(
+      searxResponse([result("https://searx.test")]),
+    );
+
+    const search = await searxSearch("query", "general", 5);
+
+    expect(search.results[0].url).toBe("https://searx.test");
+    expect(hosted.searchHostedFallback).not.toHaveBeenCalled();
+  });
+
+  it("kill switch off + successful SearXNG behaves normally (no fallback attempt)", async () => {
+    process.env.HOSTED_SEARCH_FALLBACK_ENABLED = "false";
     mockFetch.mockResolvedValueOnce(
       searxResponse([result("https://searx.test")]),
     );

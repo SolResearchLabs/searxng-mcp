@@ -54,7 +54,9 @@ describe("hosted search budget status", () => {
     process.env.EXA_SEARCH_BUDGET_WARN_PERCENT = "80";
 
     mocks.get.mockResolvedValueOnce("25");
-    await expect(getHostedSearchBudgetStatus("exa", NOW)).resolves.toMatchObject({
+    await expect(
+      getHostedSearchBudgetStatus("exa", NOW),
+    ).resolves.toMatchObject({
       state: "healthy",
       allowed: true,
       usedUnits: 25,
@@ -62,7 +64,9 @@ describe("hosted search budget status", () => {
     });
 
     mocks.get.mockResolvedValueOnce("85");
-    await expect(getHostedSearchBudgetStatus("exa", NOW)).resolves.toMatchObject({
+    await expect(
+      getHostedSearchBudgetStatus("exa", NOW),
+    ).resolves.toMatchObject({
       state: "near_limit",
       allowed: true,
       usedUnits: 85,
@@ -74,7 +78,9 @@ describe("hosted search budget status", () => {
     process.env.EXA_SEARCH_BUDGET_MONTHLY_UNITS = "100";
     mocks.get.mockResolvedValueOnce("100");
 
-    await expect(getHostedSearchBudgetStatus("exa", NOW)).resolves.toMatchObject({
+    await expect(
+      getHostedSearchBudgetStatus("exa", NOW),
+    ).resolves.toMatchObject({
       state: "exhausted",
       allowed: false,
       usedUnits: 100,
@@ -86,7 +92,9 @@ describe("hosted search budget status", () => {
     process.env.EXA_SEARCH_BUDGET_MONTHLY_UNITS = "100";
     mocks.getValkey.mockResolvedValueOnce(null);
 
-    await expect(getHostedSearchBudgetStatus("exa", NOW)).resolves.toMatchObject({
+    await expect(
+      getHostedSearchBudgetStatus("exa", NOW),
+    ).resolves.toMatchObject({
       state: "unknown",
       allowed: false,
       failOpen: false,
@@ -98,7 +106,9 @@ describe("hosted search budget status", () => {
     process.env.HOSTED_SEARCH_BUDGET_FAIL_OPEN = "true";
     mocks.getValkey.mockResolvedValueOnce(null);
 
-    await expect(getHostedSearchBudgetStatus("exa", NOW)).resolves.toMatchObject({
+    await expect(
+      getHostedSearchBudgetStatus("exa", NOW),
+    ).resolves.toMatchObject({
       state: "unknown",
       allowed: true,
       failOpen: true,

@@ -128,7 +128,10 @@ function budgetStatus(
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // resetAllMocks (not clearAllMocks): clears residual mockResolvedValueOnce
+  // queues from the previous test so a once-only provider result cannot leak
+  // into the next test's expectation.
+  vi.resetAllMocks();
   delete process.env.HOSTED_SEARCH_PROVIDER_ORDER;
   delete process.env.HOSTED_SEARCH_FALLBACK_ENABLED;
   providers.exa.configured.mockReturnValue(true);
@@ -239,7 +242,9 @@ describe("hosted search registry", () => {
 
   it("skips unknown budget health when fail-open is not enabled", async () => {
     budgets.getStatus.mockImplementation(async (provider: string) =>
-      budgetStatus(provider, provider === "exa" ? "unknown" : "healthy", false),
+      provider === "exa"
+        ? budgetStatus(provider, "unknown", false)
+        : budgetStatus(provider, "healthy"),
     );
     providers.parallel.search.mockResolvedValueOnce([
       result("https://parallel.test", "parallel"),

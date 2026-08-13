@@ -21,11 +21,11 @@ vi.mock("../src/search-providers/budget.js", () => {
   };
 });
 
+import { HostedSearchBudgetError } from "../src/search-providers/budget.js";
 import {
   hostedSearchControlSnapshot,
   runHostedSearchProvider,
 } from "../src/search-providers/control.js";
-import { HostedSearchBudgetError } from "../src/search-providers/budget.js";
 
 beforeEach(() => {
   vi.clearAllMocks();

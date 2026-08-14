@@ -66,6 +66,53 @@ export interface SearxMeta {
 export interface SearxSearchResult {
   results: SearxResult[];
   meta: SearxMeta;
+  route?: SearchRoute;
+}
+
+// ── Research-route provenance ───────────────────────────────────────────────
+// Which provider/tier actually served a request. Surfaced to users as a
+// concise "Research route:" line and in structuredContent for badge rendering.
+// Built only from explicit runtime state, never inferred from logs.
+export type SearchProviderId =
+  | "searxng"
+  | "exa"
+  | "parallel"
+  | "brave"
+  | "cache";
+export type FetchProviderId =
+  | "cloudflare"
+  | "crawl4ai"
+  | "raw"
+  | "wayback"
+  | "github"
+  | "llms_full_txt"
+  | "kiwix"
+  | "hister"
+  | "youtube"
+  | "reddit"
+  | "cache";
+
+export interface SearchRoute {
+  provider: SearchProviderId;
+  /** SearXNG engine names that returned results (searxng only). */
+  engines?: string[];
+  /** True when a primary provider missed and a fallback served instead. */
+  fallback?: boolean;
+  /** True when served from the search cache rather than a live query. */
+  cacheHit?: boolean;
+}
+
+export interface FetchRoute {
+  provider: FetchProviderId;
+  fallback?: boolean;
+  cacheHit?: boolean;
+  /** Additional distinct fetch providers (multi-page search_and_fetch). */
+  also?: FetchProviderId[];
+}
+
+export interface ResearchRoute {
+  search?: SearchRoute;
+  fetch?: FetchRoute;
 }
 
 export interface FirecrawlScrapeResponse {

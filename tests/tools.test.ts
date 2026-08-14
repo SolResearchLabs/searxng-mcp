@@ -38,6 +38,7 @@ vi.mock("../src/search.js", () => ({
       corrections: [],
       suggestions: [],
     },
+    route: { provider: "searxng", engines: ["google", "bing"] },
   }),
 }));
 
@@ -52,6 +53,7 @@ vi.mock("../src/fetch.js", () => ({
     title: "Fetched Page",
     url: "https://example.com/1",
     text: "Page content here",
+    route: { provider: "cloudflare" },
   }),
 }));
 
@@ -287,6 +289,135 @@ describe("handleFetchUrl", () => {
     await expect(
       handleFetchUrl({ url: "http://192.168.1.1/page" }),
     ).rejects.toThrow("Internal/private addresses are not allowed");
+  });
+});
+
+describe("research route provenance", () => {
+  it("search: renders SearXNG provenance and emits it in structuredContent", async () => {
+    const result = await handleSearch({ query: "test query", num_results: 5 });
+    expect(result.content[0].text).toContain(
+      "Research route: SearXNG (google, bing)",
+    );
+    expect(result.structuredContent?.researchRoute).toEqual({
+      search: { provider: "searxng", engines: ["google", "bing"] },
+    });
+  });
+
+  it("search: empty researchRoute when no provenance existed", async () => {
+    vi.mocked(searxSearch).mockResolvedValueOnce({
+      results: [
+        {
+          title: "Result 1",
+          url: "https://example.com/1",
+          content: "Some content",
+          engines: ["google"],
+        },
+      ],
+      meta: EMPTY_META,
+    });
+    const result = await handleSearch({ query: "test", num_results: 5 });
+    expect(result.content[0].text).not.toContain("Research route:");
+    expect(result.structuredContent?.researchRoute).toEqual({});
+  });
+
+  it("search: renders Cache · originally for a cached route", async () => {
+    vi.mocked(searxSearch).mockResolvedValueOnce({
+      results: [
+        {
+          title: "Result 1",
+          url: "https://example.com/1",
+          content: "Some content",
+          engines: ["google"],
+        },
+      ],
+      meta: EMPTY_META,
+      route: { provider: "searxng", engines: ["google"], cacheHit: true },
+    });
+    const result = await handleSearch({ query: "test", num_results: 5 });
+    expect(result.content[0].text).toContain(
+      "Research route: Cache · originally SearXNG (google)",
+    );
+    expect(result.structuredContent?.researchRoute).toEqual({
+      search: { provider: "searxng", engines: ["google"], cacheHit: true },
+    });
+  });
+
+  it("search_and_fetch: chains search → fetch providers", async () => {
+    const result = await handleSearchAndFetch({
+      query: "test",
+      fetch_count: 1,
+    });
+    expect(result.content[0].text).toContain(
+      "Research route: SearXNG (google, bing) → Cloudflare",
+    );
+    expect(result.structuredContent?.researchRoute).toEqual({
+      search: { provider: "searxng", engines: ["google", "bing"] },
+      fetch: { provider: "cloudflare" },
+    });
+  });
+
+  it("search_and_fetch: Crawl4AI served after a Cloudflare miss is a fallback", async () => {
+    vi.mocked(fetchPage).mockResolvedValueOnce({
+      title: "Fetched",
+      url: "https://example.com/1",
+      text: "body",
+      route: { provider: "crawl4ai", fallback: true },
+    });
+    const result = await handleSearchAndFetch({
+      query: "test",
+      fetch_count: 1,
+    });
+    expect(result.content[0].text).toContain(
+      "Research route: SearXNG (google, bing) → Crawl4AI (fallback)",
+    );
+  });
+
+  it("search_and_fetch: raw HTTP fallback renders as Raw HTTP (fallback)", async () => {
+    vi.mocked(fetchPage).mockResolvedValueOnce({
+      title: "Fetched",
+      url: "https://example.com/1",
+      text: "body",
+      route: { provider: "raw", fallback: true },
+    });
+    const result = await handleSearchAndFetch({
+      query: "test",
+      fetch_count: 1,
+    });
+    expect(result.content[0].text).toContain(
+      "Research route: SearXNG (google, bing) → Raw HTTP (fallback)",
+    );
+  });
+
+  it("search_and_summarize: renders the route line on the summary-fallback output", async () => {
+    const result = await handleSearchAndSummarize({
+      query: "test",
+      fetch_count: 2,
+    });
+    expect(result.content[0].text).toContain("Research route:");
+  });
+
+  it("fetch_url: renders a lone Cloudflare route and preserves content", async () => {
+    const result = await handleFetchUrl({ url: "https://example.com/page" });
+    expect(
+      result.content[0].text.startsWith("Research route: Cloudflare"),
+    ).toBe(true);
+    expect(result.content[0].text).toContain("Title: Fetched Page");
+    expect(result.content[0].text).toContain("URL: https://example.com/1");
+    expect(result.content[0].text).toContain("Page content here");
+    expect(result.structuredContent?.researchRoute).toEqual({
+      fetch: { provider: "cloudflare" },
+    });
+  });
+
+  it("prepends only the provenance line, leaving the result body intact", async () => {
+    const result = await handleSearch({ query: "test query", num_results: 5 });
+    const text = result.content[0].text;
+    expect(text.match(/Research route:/g)).toHaveLength(1);
+    expect(text.startsWith("Research route:")).toBe(true);
+    // The original results block follows the line verbatim.
+    expect(text).toContain("1. Result 1");
+    expect(text).toContain("URL: https://example.com/1");
+    expect(text).toContain("2. Result 2");
   });
 });
 

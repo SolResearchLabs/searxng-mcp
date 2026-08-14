@@ -21,6 +21,7 @@ import { isKiwixHost, kiwixFetch } from "./kiwix.js";
 import { tryLlmsTxtFetch } from "./llms-txt.js";
 import { incCounter, recordHistogram, withSpan } from "./observability.js";
 import { isRedditHost, redditFetch } from "./reddit.js";
+import { fetchRouteForCacheHit, fetchRouteFromTier } from "./research-route.js";
 import { checkRobots } from "./robots.js";
 import { getTiers, TIER_NAME } from "./routing.js";
 import { assertResolvedPublic } from "./ssrf-guard.js";
@@ -31,6 +32,7 @@ import {
   tier2 as pdfTier,
   waybackFetch,
 } from "./tiers/index.js";
+import type { FetchRoute } from "./types.js";
 import { isYouTubeHost, youtubeFetch } from "./youtube.js";
 
 // Re-export for callers that import assertPublicUrl from this module.
@@ -137,7 +139,12 @@ export async function fetchPage(
   domainProfile?: string,
   preferFit = false,
   tuning?: FetchTuning,
-): Promise<{ title: string; url: string; text: string }> {
+): Promise<{
+  title: string;
+  url: string;
+  text: string;
+  route: FetchRoute | null;
+}> {
   return withSpan("fetch", { "fetch.url": url }, async () => {
     const t_total = Date.now();
     assertPublicUrl(url);
@@ -171,7 +178,12 @@ export async function fetchPage(
           title: string;
           url: string;
           text: string;
+          route?: FetchRoute;
         };
+        // Cache-hit provenance: keep the original provider when the entry
+        // carries it; a legacy entry without stored provenance honestly
+        // reports "cache" (never an inferred provider).
+        const route = fetchRouteForCacheHit(r);
         events.fetchCompleted({
           url,
           tier_served: "cache",
@@ -179,7 +191,7 @@ export async function fetchPage(
           text_len: r.text.length,
           latency_ms: Date.now() - t_total,
         });
-        return { ...r, text: r.text.slice(0, maxChars) };
+        return { ...r, route, text: r.text.slice(0, maxChars) };
       } catch {
         // Corrupted cache entry — fall through to live fetch
       }
@@ -187,6 +199,10 @@ export async function fetchPage(
 
     let result: TierResult;
     let tierServed = "github";
+    // Explicit provenance for the tier that produces the accepted result.
+    // Initialised for the GitHub fast path; reassigned by the cascade/wayback
+    // and stamped into the cache so later hits can say "originally X".
+    let servedRoute: FetchRoute | null = fetchRouteFromTier("github");
     if (isGithubUrl(url)) {
       // GitHub fast path — routed through runTier() so its hit/miss/error is
       // recorded in the domain-db and OTel like any other tier (SXNG-10).
@@ -218,6 +234,7 @@ export async function fetchPage(
           title: llms.title,
           url: llms.url,
           text: llms.text,
+          route: fetchRouteFromTier("llms_full_txt"),
         };
         await cacheSet(key, JSON.stringify(persisted), FETCH_CACHE_TTL_SECONDS);
         events.fetchCompleted({
@@ -243,6 +260,7 @@ export async function fetchPage(
             title: kiwix.title,
             url: kiwix.url,
             text: kiwix.text,
+            route: fetchRouteFromTier("kiwix"),
           };
           await cacheSet(
             key,
@@ -275,6 +293,7 @@ export async function fetchPage(
           title: hister.title,
           url: hister.url,
           text: hister.text,
+          route: fetchRouteFromTier("hister"),
         };
         await cacheSet(key, JSON.stringify(persisted), FETCH_CACHE_TTL_SECONDS);
         events.fetchCompleted({
@@ -298,7 +317,12 @@ export async function fetchPage(
         );
         if (yt) {
           incCounter("fetch", { tier: "youtube", outcome: "hit" });
-          const persisted = { title: yt.title, url: yt.url, text: yt.text };
+          const persisted = {
+            title: yt.title,
+            url: yt.url,
+            text: yt.text,
+            route: fetchRouteFromTier("youtube"),
+          };
           await cacheSet(
             key,
             JSON.stringify(persisted),
@@ -325,7 +349,12 @@ export async function fetchPage(
         );
         if (rd) {
           incCounter("fetch", { tier: "reddit", outcome: "hit" });
-          const persisted = { title: rd.title, url: rd.url, text: rd.text };
+          const persisted = {
+            title: rd.title,
+            url: rd.url,
+            text: rd.text,
+            route: fetchRouteFromTier("reddit"),
+          };
           await cacheSet(
             key,
             JSON.stringify(persisted),
@@ -395,6 +424,8 @@ export async function fetchPage(
           title: pdfResult.title,
           url: pdfResult.url,
           text: pdfResult.text,
+          // Direct PDF route — Crawl4AI is the primary for PDFs, not a fallback.
+          route: fetchRouteFromTier("tier2_crawl4ai"),
         };
         await cacheSet(key, JSON.stringify(persisted), FETCH_CACHE_TTL_SECONDS);
         events.fetchCompleted({
@@ -417,6 +448,9 @@ export async function fetchPage(
         );
         if (fetched) {
           tierServed = tier.name;
+          // A cascade tier reached after a higher-priority miss (anything but
+          // the tier-1 primary) is a fallback.
+          servedRoute = fetchRouteFromTier(tier.name, tier.slot !== "tier1");
           if (tier.slot !== "tier1") {
             console.error(`[searxng-mcp] fetch ${tier.slot} hit url=${url}`);
           }
@@ -432,6 +466,8 @@ export async function fetchPage(
         );
         if (fetched) {
           tierServed = "tier4_wayback";
+          // Wayback runs only when every cascade tier missed — always a fallback.
+          servedRoute = fetchRouteFromTier("tier4_wayback", true);
           console.error(`[searxng-mcp] fetch tier4_wayback hit url=${url}`);
         } else {
           console.error(`[searxng-mcp] fetch tier4_wayback miss url=${url}`);
@@ -456,11 +492,12 @@ export async function fetchPage(
       );
     }
 
-    // Strip html from cache payload — only the resolved title/text/url are persisted
+    // Strip html from cache payload — title/text/url + provenance are persisted
     const persisted = {
       title: result.title,
       url: result.url,
       text: result.text,
+      route: servedRoute,
     };
     await cacheSet(key, JSON.stringify(persisted), FETCH_CACHE_TTL_SECONDS);
 

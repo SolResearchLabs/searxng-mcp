@@ -17,13 +17,60 @@ import type { FetchTuning } from "./fetch-utils.js";
 import { incCounter, recordHistogram, withSpan } from "./observability.js";
 import { formatSummaryResult, summarizePages } from "./ollama.js";
 import { rerankWithFallback } from "./reranker.js";
+import { aggregateFetchRoutes, researchRouteLine } from "./research-route.js";
 import { searxSearch } from "./search.js";
 import {
   CategorySchema,
+  type FetchRoute,
+  type ResearchRoute,
+  type SearchRoute,
   type SearxMeta,
   type SearxResult,
   TimeRangeSchema,
 } from "./types.js";
+
+// ResearchRoute for tools that carried no provenance this request (e.g. a
+// fully-cached legacy result). Kept as {} so structuredContent always carries
+// the key for badge rendering.
+const EMPTY_RESEARCH_ROUTE: ResearchRoute = {};
+
+function withResearchRouteLine(
+  researchRoute: ResearchRoute | undefined,
+  body: string,
+): string {
+  const line = researchRoute ? researchRouteLine(researchRoute) : null;
+  return line ? `${line}\n\n${body}` : body;
+}
+
+function fetchRoutesOf(
+  settled: Array<
+    PromiseSettledResult<{
+      title: string;
+      url: string;
+      text: string;
+      route: FetchRoute | null;
+    }>
+  >,
+): FetchRoute[] {
+  return settled
+    .filter((r) => r.status === "fulfilled")
+    .map((r) => r.value.route)
+    .filter((r): r is FetchRoute => r !== null);
+}
+
+// Compose the per-request provenance from whatever served. `searchRoute` is the
+// route returned by the search layer (provider + engines, or a cache stamp);
+// `fetchRoute` is the aggregated fetch route for the pages we actually pulled.
+// Returns undefined when nothing served so callers can omit the badge line.
+function buildResearchRoute(
+  searchRoute: SearchRoute | undefined,
+  fetchRoute: FetchRoute | null | undefined,
+): ResearchRoute | undefined {
+  const research: ResearchRoute = {};
+  if (searchRoute) research.search = searchRoute;
+  if (fetchRoute) research.fetch = fetchRoute;
+  return research.search || research.fetch ? research : undefined;
+}
 
 async function instrumentTool<T>(
   toolName: string,
@@ -143,7 +190,11 @@ function withMeta(meta: SearxMeta, body: string): string {
 // Structured payload for the `search` tool so callers can programmatically
 // check for a direct answer without parsing the text block. Shape matches
 // SearchOutputSchema (validated by the SDK before it leaves the server).
-function buildSearchStructured(meta: SearxMeta, results: SearxResult[]) {
+function buildSearchStructured(
+  meta: SearxMeta,
+  results: SearxResult[],
+  researchRoute?: ResearchRoute,
+) {
   return {
     answers: meta.answers.map((a) => ({
       answer: a.answer,
@@ -161,6 +212,7 @@ function buildSearchStructured(meta: SearxMeta, results: SearxResult[]) {
       url: r.url,
       content: r.content ?? null,
     })),
+    researchRoute: researchRoute ?? EMPTY_RESEARCH_ROUTE,
   };
 }
 
@@ -189,7 +241,11 @@ export async function handleSearch({
     withSearchEvents(
       { query, profile: domain_profile, expand, time_range, num_results },
       async () => {
-        const { results: raw, meta } = await searxSearch(
+        const {
+          results: raw,
+          meta,
+          route: searchRoute,
+        } = await searxSearch(
           query,
           category ?? "general",
           num_results,
@@ -206,6 +262,13 @@ export async function handleSearch({
           num_results,
           time_range,
         );
+        const researchRoute: ResearchRoute | undefined = searchRoute
+          ? { search: searchRoute }
+          : undefined;
+        const body = formatResults(ranked);
+        // The badge only points at content that materialised — an empty result
+        // keeps its terse "No results found." untouched.
+        const hasContent = ranked.length > 0 || formatMeta(meta) !== "";
         return {
           ranked,
           rerankApplied: true,
@@ -213,10 +276,17 @@ export async function handleSearch({
             content: [
               {
                 type: "text" as const,
-                text: withMeta(meta, formatResults(ranked)),
+                text: withResearchRouteLine(
+                  hasContent ? researchRoute : undefined,
+                  withMeta(meta, body),
+                ),
               },
             ],
-            structuredContent: buildSearchStructured(meta, ranked),
+            structuredContent: buildSearchStructured(
+              meta,
+              ranked,
+              researchRoute,
+            ),
           },
         };
       },
@@ -255,7 +325,11 @@ export async function handleSearchAndFetch({
         num_results: fetch_count,
       },
       async () => {
-        const { results: raw, meta } = await searxSearch(
+        const {
+          results: raw,
+          meta,
+          route: searchRoute,
+        } = await searxSearch(
           query,
           category ?? "general",
           5,
@@ -277,6 +351,9 @@ export async function handleSearchAndFetch({
                   text: withMeta(meta, "No results found."),
                 },
               ],
+              structuredContent: {
+                researchRoute: EMPTY_RESEARCH_ROUTE,
+              },
             },
           };
         }
@@ -300,6 +377,10 @@ export async function handleSearchAndFetch({
             return `\n\n--- Could not fetch result ${i + 1}: ${err} ---`;
           })
           .join("");
+        const researchRoute: ResearchRoute | undefined = buildResearchRoute(
+          searchRoute,
+          aggregateFetchRoutes(fetchRoutesOf(fetched)),
+        );
         return {
           ranked,
           rerankApplied: true,
@@ -307,9 +388,15 @@ export async function handleSearchAndFetch({
             content: [
               {
                 type: "text" as const,
-                text: withMeta(meta, searchText + fetchedSections),
+                text: withResearchRouteLine(
+                  researchRoute,
+                  withMeta(meta, searchText + fetchedSections),
+                ),
               },
             ],
+            structuredContent: {
+              researchRoute: researchRoute ?? EMPTY_RESEARCH_ROUTE,
+            },
           },
         };
       },
@@ -348,7 +435,11 @@ export async function handleSearchAndSummarize({
         num_results: fetch_count,
       },
       async () => {
-        const { results: raw, meta } = await searxSearch(
+        const {
+          results: raw,
+          meta,
+          route: searchRoute,
+        } = await searxSearch(
           query,
           category ?? "general",
           fetch_count + 2,
@@ -370,6 +461,9 @@ export async function handleSearchAndSummarize({
                   text: withMeta(meta, "No results found."),
                 },
               ],
+              structuredContent: {
+                researchRoute: EMPTY_RESEARCH_ROUTE,
+              },
             },
           };
         }
@@ -387,9 +481,19 @@ export async function handleSearchAndSummarize({
         const successfulPages = fetched
           .map((r) => (r.status === "fulfilled" ? r.value : null))
           .filter(
-            (r): r is { title: string; url: string; text: string } =>
-              r !== null,
+            (
+              r,
+            ): r is {
+              title: string;
+              url: string;
+              text: string;
+              route: FetchRoute | null;
+            } => r !== null,
           );
+        const researchRoute: ResearchRoute | undefined = buildResearchRoute(
+          searchRoute,
+          aggregateFetchRoutes(fetchRoutesOf(fetched)),
+        );
         const summaryResult = await withSpan(
           "summarize_llm",
           { "summary.pages": successfulPages.length },
@@ -417,9 +521,15 @@ export async function handleSearchAndSummarize({
               content: [
                 {
                   type: "text" as const,
-                  text: withMeta(meta, searchText + fetchedSections),
+                  text: withResearchRouteLine(
+                    researchRoute,
+                    withMeta(meta, searchText + fetchedSections),
+                  ),
                 },
               ],
+              structuredContent: {
+                researchRoute: researchRoute ?? EMPTY_RESEARCH_ROUTE,
+              },
             },
           };
         }
@@ -428,7 +538,18 @@ export async function handleSearchAndSummarize({
           ranked,
           rerankApplied: true,
           result: {
-            content: [{ type: "text" as const, text: withMeta(meta, output) }],
+            content: [
+              {
+                type: "text" as const,
+                text: withResearchRouteLine(
+                  researchRoute,
+                  withMeta(meta, output),
+                ),
+              },
+            ],
+            structuredContent: {
+              researchRoute: researchRoute ?? EMPTY_RESEARCH_ROUTE,
+            },
           },
         };
       },
@@ -469,11 +590,25 @@ export async function handleFetchUrl({
       title,
       url: fetchedUrl,
       text,
+      route,
     } = await fetchPage(url, maxChars, domain_profile, false, tuning);
+    const researchRoute: ResearchRoute | undefined = route
+      ? { fetch: route }
+      : undefined;
     const output = [`Title: ${title}`, `URL: ${fetchedUrl}`, "", text].join(
       "\n",
     );
-    return { content: [{ type: "text" as const, text: output }] };
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: withResearchRouteLine(researchRoute, output),
+        },
+      ],
+      structuredContent: {
+        researchRoute: researchRoute ?? EMPTY_RESEARCH_ROUTE,
+      },
+    };
   });
 }
 
@@ -671,6 +806,46 @@ const SiteSchema = z
     "Restrict results to one domain or a list of domains (e.g. 'github.com'). Best-effort — applied as a site: query operator; most engines honor it but some ignore it.",
   );
 
+// Provenance for the research route badge. The enums mirror the SearchRoute /
+// FetchRoute unions in types.ts — the SDK strictly validates the search tool's
+// structuredContent against SearchOutputSchema, so a mismatch throws.
+const SearchProviderSchema = z.enum([
+  "searxng",
+  "exa",
+  "parallel",
+  "brave",
+  "cache",
+]);
+const FetchProviderSchema = z.enum([
+  "cloudflare",
+  "crawl4ai",
+  "raw",
+  "wayback",
+  "github",
+  "llms_full_txt",
+  "kiwix",
+  "hister",
+  "youtube",
+  "reddit",
+  "cache",
+]);
+const SearchRouteSchema = z.object({
+  provider: SearchProviderSchema,
+  engines: z.array(z.string()).optional(),
+  fallback: z.boolean().optional(),
+  cacheHit: z.boolean().optional(),
+});
+const FetchRouteSchema = z.object({
+  provider: FetchProviderSchema,
+  fallback: z.boolean().optional(),
+  cacheHit: z.boolean().optional(),
+  also: z.array(FetchProviderSchema).optional(),
+});
+const ResearchRouteSchema = z.object({
+  search: SearchRouteSchema.optional(),
+  fetch: FetchRouteSchema.optional(),
+});
+
 // Output schema for the `search` tool — surfaces SearXNG's native answers /
 // infoboxes / corrections / suggestions alongside a minimal result list so
 // callers can check for a direct answer programmatically.
@@ -694,6 +869,7 @@ const SearchOutputSchema = z.object({
       content: z.string().nullable(),
     }),
   ),
+  researchRoute: ResearchRouteSchema.optional(),
 });
 
 export function registerTools(server: McpServer): void {

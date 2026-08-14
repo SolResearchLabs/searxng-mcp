@@ -97,6 +97,7 @@ vi.mock("../src/tiers/index.js", () => ({
   waybackFetch: vi.fn().mockResolvedValue(null),
 }));
 
+import { cacheGet } from "../src/cache.js";
 import { recordTierAttempt } from "../src/domain-db.js";
 import { fetchPage } from "../src/fetch.js";
 import { tryLlmsTxtFetch } from "../src/llms-txt.js";
@@ -107,6 +108,7 @@ const githubFetchMock = vi.mocked(githubFetch);
 const checkRobotsMock = vi.mocked(checkRobots);
 const llmsTxtMock = vi.mocked(tryLlmsTxtFetch);
 const recordTierAttemptMock = vi.mocked(recordTierAttempt);
+const cacheGetMock = vi.mocked(cacheGet);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -184,5 +186,63 @@ describe("fetchPage — GitHub fast path", () => {
     // Fell all the way through the fast paths and hit the robots gate,
     // proving normal-cascade routing.
     expect(checkRobotsMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("fetchPage — provenance", () => {
+  it("reports github as the serving provider for the GitHub fast path (not a fallback)", async () => {
+    githubFetchMock.mockResolvedValueOnce({
+      title: "f.txt",
+      url: "https://raw.githubusercontent.com/a/b/main/f.txt",
+      text: "file contents",
+    });
+    const result = await fetchPage(
+      "https://raw.githubusercontent.com/a/b/main/f.txt",
+    );
+    expect(result.route).toEqual({ provider: "github" });
+  });
+
+  it("stamps cacheHit on a cached fetch route that kept its known provenance", async () => {
+    cacheGetMock.mockResolvedValueOnce(
+      JSON.stringify({
+        title: "Cached",
+        url: "https://example.com/cached",
+        text: "cached body",
+        route: { provider: "cloudflare" },
+      }),
+    );
+    const result = await fetchPage("https://example.com/cached");
+    expect(result.route).toEqual({ provider: "cloudflare", cacheHit: true });
+    expect(result.text).toBe("cached body");
+    // A cache hit must not re-run the tier cascade.
+    expect(checkRobotsMock).not.toHaveBeenCalled();
+  });
+
+  it("reports provider 'cache' for a legacy cached fetch entry without provenance", async () => {
+    cacheGetMock.mockResolvedValueOnce(
+      JSON.stringify({
+        title: "Cached",
+        url: "https://example.com/cached",
+        text: "cached body",
+      }),
+    );
+    const result = await fetchPage("https://example.com/cached");
+    // Honest fallback: never infer the original provider from the absence of a
+    // fallback log — a legacy entry without stored provenance reports "cache".
+    expect(result.route).toEqual({ provider: "cache", cacheHit: true });
+    expect(result.text).toBe("cached body");
+  });
+
+  it("does not trust an unrecognised tier stored in a cached route", async () => {
+    cacheGetMock.mockResolvedValueOnce(
+      JSON.stringify({
+        title: "Cached",
+        url: "https://example.com/cached",
+        text: "cached body",
+        route: { provider: "tier1_cloudflare" },
+      }),
+    );
+    const result = await fetchPage("https://example.com/cached");
+    expect(result.route).toEqual({ provider: "cache", cacheHit: true });
   });
 });

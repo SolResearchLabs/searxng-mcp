@@ -11,10 +11,15 @@ import { expandQuery } from "./ollama.js";
 import { runSearxng } from "./provider-control.js";
 import { ProviderHttpError, parseRetryAfterMs } from "./provider-errors.js";
 import {
+  collectSearchEngines,
+  searchRouteForCacheHit,
+} from "./research-route.js";
+import {
   hasUsefulPrimarySearch,
   searchHostedFallback,
 } from "./search-providers/index.js";
 import type {
+  SearchRoute,
   SearxMeta,
   SearxResponse,
   SearxResult,
@@ -136,9 +141,14 @@ export async function searxSearchSingle(
         }
 
         const data = (await res.json()) as SearxResponse;
+        const results = data.results.slice(0, fetchCount);
         return {
-          results: data.results.slice(0, fetchCount),
+          results,
           meta: normalizeSearxMeta(data),
+          route: {
+            provider: "searxng",
+            engines: collectSearchEngines(results),
+          },
         };
       },
     ),
@@ -196,10 +206,12 @@ async function primarySearchWithFallback(
     });
     if (fallback) {
       // Preserve useful SearXNG direct-answer metadata when a live SearXNG
-      // request succeeded but its normal result list was too sparse.
+      // request succeeded but its normal result list was too sparse. The
+      // route records which hosted provider actually served.
       return {
         results: fallback.results,
         meta: primary?.meta ?? fallback.meta,
+        route: { provider: fallback.provider, fallback: true },
       };
     }
   }
@@ -233,14 +245,24 @@ export async function searxSearch(
     try {
       const parsed = JSON.parse(cached) as
         | SearxResult[]
-        | { results: SearxResult[]; meta?: SearxMeta };
+        | { results: SearxResult[]; meta?: SearxMeta; route?: SearchRoute };
       const results = Array.isArray(parsed) ? parsed : parsed.results;
       const meta = Array.isArray(parsed)
         ? EMPTY_META
         : (parsed.meta ?? EMPTY_META);
+      // Cache-hit provenance: keep the original provider if the entry carries
+      // it; a legacy entry without stored provenance honestly reports "cache"
+      // (never an inferred provider).
+      const route = Array.isArray(parsed)
+        ? { provider: "cache" as const, cacheHit: true }
+        : searchRouteForCacheHit(parsed);
       recordSearchAppearances(results);
       // Domain filtering applied after cache retrieval so profile changes take effect immediately
-      return { results: applyDomainFilters(results, domainProfile), meta };
+      return {
+        results: applyDomainFilters(results, domainProfile),
+        meta,
+        route,
+      };
     } catch {
       // Corrupted cache entry — fall through to live fetch
     }
@@ -306,9 +328,14 @@ export async function searxSearch(
     // Cache only the original-query result set, including a hosted fallback if
     // one was needed. This prevents repeatedly spending hosted quota for the
     // same query while keeping expanded-variant content out of the base cache.
+    // The route is persisted so a later cache hit can say "originally X".
     await cacheSet(
       key,
-      JSON.stringify({ results: original.results, meta: original.meta }),
+      JSON.stringify({
+        results: original.results,
+        meta: original.meta,
+        route: original.route,
+      }),
       CACHE_TTL_SECONDS,
     );
 
@@ -316,6 +343,7 @@ export async function searxSearch(
     return {
       results: applyDomainFilters(merged, domainProfile),
       meta: original.meta,
+      route: original.route,
     };
   }
 
@@ -332,7 +360,7 @@ export async function searxSearch(
   // Cache pre-filter results so domain config changes apply retroactively on cache hits.
   await cacheSet(
     key,
-    JSON.stringify({ results: raw.results, meta: raw.meta }),
+    JSON.stringify({ results: raw.results, meta: raw.meta, route: raw.route }),
     CACHE_TTL_SECONDS,
   );
 
@@ -340,5 +368,6 @@ export async function searxSearch(
   return {
     results: applyDomainFilters(raw.results, domainProfile),
     meta: raw.meta,
+    route: raw.route,
   };
 }

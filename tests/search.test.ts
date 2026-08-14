@@ -11,6 +11,19 @@ vi.mock("../src/ollama.js", () => ({
   expandQuery: vi.fn().mockResolvedValue(["variant 1", "variant 2"]),
 }));
 
+// Hosted search fallback is gated on env + budget, so it's mocked outright for
+// the provenance test. hasUsefulPrimarySearch is forced false so the fallback
+// path actually runs; searchHostedFallback returns a controlled provider.
+vi.mock("../src/search-providers/index.js", () => ({
+  hasUsefulPrimarySearch: vi.fn(() => false),
+  searchHostedFallback: vi.fn(),
+  hostedSearchFallbackEnabled: vi.fn(() => true),
+  hostedSearchFallbackMinResults: vi.fn(() => 1),
+  configuredHostedSearchProviders: vi.fn(() => ["exa"]),
+  hostedSearchBudgetSnapshot: vi.fn().mockResolvedValue({}),
+  hostedSearchControlSnapshot: vi.fn().mockResolvedValue({}),
+}));
+
 vi.mock("../src/domains.js", () => ({
   applyDomainFilters: vi.fn().mockImplementation((results) => results),
 }));
@@ -54,6 +67,7 @@ import { cacheGet, cacheSet } from "../src/cache.js";
 import { recordSearchAppearance } from "../src/domain-db.js";
 import { applyDomainFilters } from "../src/domains.js";
 import { normalizeSearxMeta, searxSearch } from "../src/search.js";
+import { searchHostedFallback } from "../src/search-providers/index.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -266,6 +280,45 @@ describe("searxSearch", () => {
     ]);
     expect(meta.corrections).toEqual(["corrected query"]);
     expect(meta.suggestions).toEqual(["related one", "related two"]);
+  });
+
+  it("records the hosted fallback provider in the route when SearXNG is not useful", async () => {
+    mockFetch.mockResolvedValue(mockSearxResponse([]));
+    vi.mocked(searchHostedFallback).mockResolvedValue({
+      results: [makeResult("https://exa.example.com")],
+      meta: { answers: [], infoboxes: [], corrections: [], suggestions: [] },
+      provider: "exa",
+      attempts: [],
+    });
+    const { results, route } = await searxSearch("query", "general", 5);
+    expect(searchHostedFallback).toHaveBeenCalledOnce();
+    expect(route).toEqual({ provider: "exa", fallback: true });
+    expect(results).toHaveLength(1);
+    expect(results[0].url).toBe("https://exa.example.com");
+  });
+
+  it("stamps cacheHit on a cached route that kept its known provenance", async () => {
+    const cached = JSON.stringify({
+      results: [makeResult("https://cached.com")],
+      meta: { answers: [], infoboxes: [], corrections: [], suggestions: [] },
+      route: { provider: "searxng", engines: ["google", "bing"] },
+    });
+    vi.mocked(cacheGet).mockResolvedValue(cached);
+    const { results, route } = await searxSearch("query", "general", 5);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(results).toHaveLength(1);
+    expect(route).toEqual({
+      provider: "searxng",
+      engines: ["google", "bing"],
+      cacheHit: true,
+    });
+  });
+
+  it("reports provider 'cache' for a legacy cache entry without provenance", async () => {
+    const cached = JSON.stringify([makeResult("https://cached.com")]);
+    vi.mocked(cacheGet).mockResolvedValue(cached);
+    const { route } = await searxSearch("query", "general", 5);
+    expect(route).toEqual({ provider: "cache", cacheHit: true });
   });
 });
 

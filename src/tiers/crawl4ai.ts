@@ -28,7 +28,16 @@ export async function pollCrawl4aiTask(
     if (signal.aborted) return null;
 
     try {
-      const resp = await fetch(`${CRAWL4AI_URL}/task/${taskId}`, { signal });
+      // Observed pinned Crawl4AI 0.9.2 contract: async job status lives at
+      // GET /crawl/job/{task_id} and requires Bearer auth (same credential
+      // semantics as POST /crawl — attach only when the token is set). The
+      // legacy /task/{id} route does not exist in 0.9.2.
+      const resp = await fetch(`${CRAWL4AI_URL}/crawl/job/${taskId}`, {
+        signal,
+        ...(CRAWL4AI_API_TOKEN
+          ? { headers: { Authorization: `Bearer ${CRAWL4AI_API_TOKEN}` } }
+          : {}),
+      });
       if (!resp.ok) return null;
 
       const data = JSON.parse(await readBoundedText(resp)) as Record<

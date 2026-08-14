@@ -1,9 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// vi.mock is hoisted — runs before imports, so CRAWL4AI_URL is set correctly
+// Mutable holder so tests exercise both token-present and token-absent poll
+// auth. vi.hoisted runs before the hoisted vi.mock factory below.
+const token = vi.hoisted(() => ({ value: undefined as string | undefined }));
+
+// vi.mock is hoisted — runs before imports, so CRAWL4AI_URL is set correctly.
+// The getter keeps CRAWL4AI_API_TOKEN a live binding the adapter reads at
+// request-build time, so each test can control poll auth individually.
 vi.mock("../../src/config.js", () => ({
   CRAWL4AI_URL: "http://crawl4ai:8000",
-  CRAWL4AI_API_TOKEN: undefined,
+  get CRAWL4AI_API_TOKEN() {
+    return token.value;
+  },
   ADBLOCK_PROXY_URL: null,
 }));
 
@@ -21,6 +29,7 @@ vi.stubGlobal("fetch", mockFetch);
 import { crawl4aiFetch, pollCrawl4aiTask } from "../../src/tiers/crawl4ai.js";
 
 beforeEach(() => {
+  token.value = undefined;
   vi.clearAllMocks();
 });
 
@@ -71,6 +80,42 @@ describe("crawl4aiFetch", () => {
     );
     const result = await crawl4aiFetch(URL);
     expect(result).toBeNull();
+  });
+
+  it("polls GET /crawl/job/{task_id} when /crawl returns a task_id (pinned 0.9.2 contract)", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ task_id: "crawl_abc123" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: "completed",
+            result: {
+              markdown: { raw_markdown: "async page content" },
+              metadata: { title: "Async Page" },
+              html: "<p>async</p>",
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    vi.useFakeTimers();
+    const promise = crawl4aiFetch(URL);
+    await vi.advanceTimersByTimeAsync(2500);
+    const result = await promise;
+    vi.useRealTimers();
+
+    const pollCall = mockFetch.mock.calls[1];
+    expect(String(pollCall[0])).toBe(
+      "http://crawl4ai:8000/crawl/job/crawl_abc123",
+    );
+    expect(result).not.toBeNull();
+    expect(result?.title).toBe("Async Page");
+    expect(result?.text).toBe("async page content");
   });
 
   it("returns null when response is not-ok", async () => {
@@ -127,9 +172,70 @@ describe("pollCrawl4aiTask", () => {
     const result = await promise;
     vi.useRealTimers();
 
+    expect(String(mockFetch.mock.calls[0][0])).toBe(
+      "http://crawl4ai:8000/crawl/job/task123",
+    );
     expect(result).not.toBeNull();
     expect(result?.title).toBe("Polled Page");
     expect(result?.text).toBe("page content");
+  });
+
+  it("sends Bearer auth on the poll when CRAWL4AI_API_TOKEN is set", async () => {
+    token.value = "secret-token";
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: "completed",
+          result: {
+            markdown: { raw_markdown: "auth content" },
+            metadata: { title: "Auth Page" },
+            html: null,
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const promise = pollCrawl4aiTask("task123", URL, 8000, controller.signal);
+    await vi.advanceTimersByTimeAsync(2500);
+    const result = await promise;
+    vi.useRealTimers();
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(String(mockFetch.mock.calls[0][0])).toBe(
+      "http://crawl4ai:8000/crawl/job/task123",
+    );
+    expect(init.headers).toEqual({ Authorization: "Bearer secret-token" });
+    expect(result?.title).toBe("Auth Page");
+  });
+
+  it("sends no Authorization header on the poll when token is absent", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: "completed",
+          result: {
+            markdown: { raw_markdown: "noauth content" },
+            metadata: { title: "NoAuth Page" },
+            html: null,
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const promise = pollCrawl4aiTask("task123", URL, 8000, controller.signal);
+    await vi.advanceTimersByTimeAsync(2500);
+    const result = await promise;
+    vi.useRealTimers();
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers).toBeUndefined();
+    expect(result?.title).toBe("NoAuth Page");
   });
 
   it("returns null when status is failed", async () => {

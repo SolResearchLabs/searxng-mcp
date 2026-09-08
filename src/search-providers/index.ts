@@ -8,6 +8,7 @@ import {
 } from "./budget.js";
 import { exaSearchProvider } from "./exa.js";
 import { parallelSearchProvider } from "./parallel.js";
+import { tinyfishSearchProvider } from "./tinyfish.js";
 import type {
   HostedSearchAttempt,
   HostedSearchFallbackResult,
@@ -26,10 +27,16 @@ const EMPTY_META: SearxMeta = {
 const PROVIDERS: Record<HostedSearchProviderId, HostedSearchProvider> = {
   exa: exaSearchProvider,
   parallel: parallelSearchProvider,
+  tinyfish: tinyfishSearchProvider,
   brave: braveSearchProvider,
 };
 
-const DEFAULT_ORDER: HostedSearchProviderId[] = ["exa", "parallel", "brave"];
+const DEFAULT_ORDER: HostedSearchProviderId[] = [
+  "exa",
+  "parallel",
+  "tinyfish",
+  "brave",
+];
 
 function providerOrder(): HostedSearchProviderId[] {
   const raw = process.env.HOSTED_SEARCH_PROVIDER_ORDER?.trim();

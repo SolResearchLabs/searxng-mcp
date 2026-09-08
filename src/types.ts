@@ -77,6 +77,7 @@ export type SearchProviderId =
   | "searxng"
   | "exa"
   | "parallel"
+  | "tinyfish"
   | "brave"
   | "cache";
 export type FetchProviderId =
@@ -120,57 +121,132 @@ export interface FirecrawlScrapeResponse {
   data?: {
     markdown?: string;
     html?: string;
-    metadata?: {
-      title?: string;
-      sourceURL?: string;
-    };
+    metadata?: { title?: string; sourceURL?: string };
   };
-  error?: string;
 }
 
-export interface RerankResult {
-  index: number;
-  relevance_score: number;
+export interface Crawl4AIResult {
+  success?: boolean;
+  url?: string;
+  markdown?: {
+    raw_markdown?: string;
+    fit_markdown?: string;
+  };
+  html?: string;
+  metadata?: { title?: string };
 }
 
-export interface RerankResponse {
-  results: RerankResult[];
+export interface Crawl4AISyncResponse {
+  results?: Crawl4AIResult[];
+  data?: {
+    results?: Crawl4AIResult[];
+    task_id?: string;
+  };
+  task_id?: string;
 }
 
-export interface OllamaGenerateResponse {
-  response: string;
+export interface Crawl4AIAsyncResponse {
+  status?: string;
+  result?: Crawl4AIResult;
+  results?: Crawl4AIResult[];
+  data?: {
+    result?: Crawl4AIResult;
+    results?: Crawl4AIResult[];
+  };
 }
 
-export interface OllamaChatMessage {
-  role: string;
-  content: string;
-}
-
-export interface OllamaChatResponse {
-  message: OllamaChatMessage;
-}
-
-export interface Citation {
-  url: string;
+export interface FetchResult {
   title: string;
-  key_facts: string[];
+  url: string;
+  text: string;
+  route?: FetchRoute;
 }
 
-export interface SummaryResult {
-  summary: string;
-  citations: Citation[];
+export interface CacheEntry<T> {
+  value: T;
+  expiresAt: number;
 }
 
-export interface GitHubReadmeResponse {
-  content: string;
-  name: string;
-  html_url: string;
+export interface SearchArgs {
+  query: string;
+  num_results?: number;
+  category?: string;
+  time_range?: string;
+  domain_profile?: string;
+  expand?: boolean;
+  language?: string;
+  engines?: string;
+  site?: string | string[];
 }
 
-export const CategorySchema = z
-  .enum(["general", "news", "it", "science"])
-  .default("general");
+export interface FetchArgs {
+  url: string;
+  domain_profile?: string;
+  max_tokens?: number;
+  target_selector?: string;
+  wait_for_selector?: string;
+}
 
-export const TimeRangeSchema = z
-  .enum(["day", "week", "month", "year"])
-  .optional();
+export interface SearchAndFetchArgs extends SearchArgs {
+  fetch_count?: number;
+}
+
+export interface SearchAndSummarizeArgs extends SearchArgs {
+  fetch_count?: number;
+}
+
+export interface CrawlSiteArgs {
+  url: string;
+  max_pages?: number;
+  bfs?: boolean;
+}
+
+export interface ClearCacheArgs {
+  target: "search" | "fetch" | "crawl" | "all";
+}
+
+export interface DomainStatsArgs {
+  hostname?: string;
+}
+
+export const SearchArgsSchema = z.object({
+  query: z.string().min(1),
+  num_results: z.number().int().min(1).max(20).optional(),
+  category: z.enum(["general", "news", "it", "science"]).optional(),
+  time_range: z.enum(["day", "week", "month", "year"]).optional(),
+  domain_profile: z.string().optional(),
+  expand: z.boolean().optional(),
+  language: z.string().optional(),
+  engines: z.string().optional(),
+  site: z.union([z.string(), z.array(z.string())]).optional(),
+});
+
+export const FetchArgsSchema = z.object({
+  url: z.string().url(),
+  domain_profile: z.string().optional(),
+  max_tokens: z.number().int().min(1).max(10000).optional(),
+  target_selector: z.string().optional(),
+  wait_for_selector: z.string().optional(),
+});
+
+export const SearchAndFetchArgsSchema = SearchArgsSchema.extend({
+  fetch_count: z.number().int().min(1).max(3).optional(),
+});
+
+export const SearchAndSummarizeArgsSchema = SearchArgsSchema.extend({
+  fetch_count: z.number().int().min(1).max(5).optional(),
+});
+
+export const CrawlSiteArgsSchema = z.object({
+  url: z.string().url(),
+  max_pages: z.number().int().min(1).max(200).optional(),
+  bfs: z.boolean().optional(),
+});
+
+export const ClearCacheArgsSchema = z.object({
+  target: z.enum(["search", "fetch", "crawl", "all"]),
+});
+
+export const DomainStatsArgsSchema = z.object({
+  hostname: z.string().optional(),
+});

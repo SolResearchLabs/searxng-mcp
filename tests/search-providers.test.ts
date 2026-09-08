@@ -14,6 +14,7 @@ vi.stubGlobal("fetch", mockFetch);
 import { braveSearchProvider } from "../src/search-providers/brave.js";
 import { exaSearchProvider } from "../src/search-providers/exa.js";
 import { parallelSearchProvider } from "../src/search-providers/parallel.js";
+import { tinyfishSearchProvider } from "../src/search-providers/tinyfish.js";
 
 const originalEnv = { ...process.env };
 
@@ -21,9 +22,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.EXA_API_KEY = "exa-test";
   process.env.PARALLEL_API_KEY = "parallel-test";
+  process.env.TINYFISH_API_KEY = "tinyfish-test";
   process.env.BRAVE_SEARCH_API_KEY = "brave-test";
   delete process.env.EXA_SEARCH_TYPE;
   delete process.env.PARALLEL_SEARCH_MODE;
+  delete process.env.TINYFISH_SEARCH_LOCATION;
 });
 
 afterEach(() => {
@@ -148,6 +151,67 @@ describe("Parallel hosted search", () => {
     const options = mockFetch.mock.calls[0][1] as RequestInit;
     const body = JSON.parse(String(options.body));
     expect(body.mode).toBe("advanced");
+  });
+});
+
+describe("TinyFish hosted search", () => {
+  it("maps domains, language, freshness, news category and snippets", async () => {
+    process.env.TINYFISH_SEARCH_LOCATION = "CA";
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        results: [
+          {
+            position: 1,
+            site_name: "example.com",
+            title: "TinyFish result",
+            snippet: "tinyfish snippet",
+            url: "https://example.com/tinyfish",
+            date: "2026-08-12",
+            publisher: "Example Publisher",
+          },
+        ],
+        total_results: 1,
+        page: 0,
+      }),
+    );
+
+    const results = await tinyfishSearchProvider.search({
+      query: "browser rendering update",
+      numResults: 3,
+      category: "news",
+      timeRange: "week",
+      language: "en-CA",
+      site: ["example.com", "docs.example.com"],
+    });
+
+    const calledUrl = new URL(mockFetch.mock.calls[0][0] as string);
+    expect(`${calledUrl.origin}${calledUrl.pathname}`).toBe(
+      "https://api.search.tinyfish.ai/",
+    );
+    expect(calledUrl.searchParams.get("query")).toBe(
+      "browser rendering update",
+    );
+    expect(calledUrl.searchParams.get("page")).toBe("0");
+    expect(calledUrl.searchParams.get("domain_type")).toBe("news");
+    expect(calledUrl.searchParams.get("include_domains")).toBe(
+      "example.com,docs.example.com",
+    );
+    expect(calledUrl.searchParams.get("location")).toBe("CA");
+    expect(calledUrl.searchParams.get("language")).toBe("en");
+    expect(calledUrl.searchParams.get("recency_minutes")).toBe("10080");
+    const options = mockFetch.mock.calls[0][1] as RequestInit;
+    expect(options.headers).toMatchObject({
+      Accept: "application/json",
+      "X-API-Key": "tinyfish-test",
+    });
+    expect(results[0]).toMatchObject({
+      title: "TinyFish result",
+      url: "https://example.com/tinyfish",
+      engine: "tinyfish",
+      engines: ["tinyfish"],
+      content: "tinyfish snippet",
+      publishedDate: "2026-08-12",
+    });
   });
 });
 

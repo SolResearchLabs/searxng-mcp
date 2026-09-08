@@ -18,6 +18,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   searxng: "SearXNG",
   exa: "Exa",
   parallel: "Parallel",
+  tinyfish: "TinyFish",
   brave: "Brave",
   cloudflare: "Cloudflare",
   crawl4ai: "Crawl4AI",
@@ -40,6 +41,7 @@ const KNOWN_SEARCH_PROVIDERS: readonly SearchProviderId[] = [
   "searxng",
   "exa",
   "parallel",
+  "tinyfish",
   "brave",
   "cache",
 ];

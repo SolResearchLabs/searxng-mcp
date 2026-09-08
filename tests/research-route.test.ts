@@ -95,6 +95,7 @@ describe("formatSearchRoute", () => {
 
   it("omits the engine list for hosted providers", () => {
     expect(formatSearchRoute({ provider: "exa" })).toBe("Exa");
+    expect(formatSearchRoute({ provider: "tinyfish" })).toBe("TinyFish");
   });
 
   it("marks a hosted fallback", () => {

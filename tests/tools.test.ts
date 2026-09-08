@@ -174,6 +174,31 @@ describe("handleSearch", () => {
     ]);
     expect(result.structuredContent?.suggestions).toEqual(["related"]);
   });
+
+  it("allows TinyFish search provenance in structuredContent", async () => {
+    vi.mocked(searxSearch).mockResolvedValueOnce({
+      results: [
+        {
+          title: "TinyFish Result",
+          url: "https://tinyfish.ai/",
+          content: "Provider result",
+          engine: "tinyfish",
+          engines: ["tinyfish"],
+        },
+      ],
+      meta: EMPTY_META,
+      route: { provider: "tinyfish", fallback: true },
+    });
+
+    const result = await handleSearch({ query: "tinyfish", num_results: 3 });
+
+    expect(result.structuredContent?.researchRoute).toEqual({
+      search: { provider: "tinyfish", fallback: true },
+    });
+    expect(result.content[0].text).toContain(
+      "Research route: TinyFish (fallback)",
+    );
+  });
 });
 
 describe("handleSearchAndFetch", () => {

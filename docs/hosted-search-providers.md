@@ -289,9 +289,7 @@ A failure/open circuit for one hosted provider does not prevent the fallback rou
 
 ## Budget health is deliberately separate
 
-This phase controls technical health and concurrency but does not yet make account-credit state part of routing.
-
-That is intentional. The next budget layer should model states such as:
+Budget health is modeled separately from provider circuit health with states such as:
 
 ```text
 healthy
@@ -300,9 +298,7 @@ exhausted
 unknown
 ```
 
-separately from provider circuit health.
-
-A provider can be technically healthy while its configured monthly budget is nearly exhausted. Treating a billing/quota state as an ordinary technical failure would mix two different routing signals.
+A provider can be technically healthy while its configured monthly budget is nearly exhausted. Treating a billing/quota state as an ordinary technical failure would mix two different routing signals. The fallback router keeps the operator's configured order inside each budget-health class, while near-limit, exhausted or unverifiable budgets can be delayed or blocked according to the budget policy.
 
 ## Official provider MCPs are a separate failure domain
 

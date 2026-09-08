@@ -41,11 +41,12 @@ Multi-provider aggregation / reciprocal-rank fusion remains a future explicit de
 
 ## Included providers
 
-The first registry contains:
+The registry contains:
 
 ```text
 Exa
 Parallel
+TinyFish
 Brave Search
 ```
 
@@ -58,13 +59,13 @@ The interface also records capabilities such as semantic search, recency, domain
 Default:
 
 ```text
-exa,parallel,brave
+exa,parallel,tinyfish,brave
 ```
 
 Override with:
 
 ```text
-HOSTED_SEARCH_PROVIDER_ORDER=parallel,brave,exa
+HOSTED_SEARCH_PROVIDER_ORDER=tinyfish,parallel,brave,exa
 ```
 
 Unknown names and duplicates are ignored. Unconfigured providers are skipped without an API call.
@@ -139,6 +140,7 @@ The normalized result retains the provider name in `engine` / `engines`, for exa
 ```text
 engine=exa
 engine=parallel
+engine=tinyfish
 engine=brave
 ```
 
@@ -206,6 +208,31 @@ News intent is retained in the objective because it is a relevance preference ra
 
 Parallel excerpts are normalized into the search result content field.
 
+## TinyFish adapter
+
+Credential:
+
+```text
+TINYFISH_API_KEY
+```
+
+Optional geo default:
+
+```text
+TINYFISH_SEARCH_LOCATION=US
+```
+
+UltraSearch calls TinyFish Search with `GET https://api.search.tinyfish.ai` and maps:
+
+- query;
+- site filters to TinyFish `include_domains`;
+- `day/week/month/year` to `recency_minutes`;
+- BCP-47-style language input to its primary language component when valid;
+- `category=news` to `domain_type=news`;
+- TinyFish snippets and publication dates into the normalized search result content/provenance fields.
+
+TinyFish does not need a provider-specific branch in the search path. It is a normal hosted-search provider and runs through the same sequential fallback registry, budget reservation, bounded queue and circuit breaker as the other hosted providers.
+
 ## Brave Search adapter
 
 Credential:
@@ -254,6 +281,7 @@ Provider prefixes are:
 ```text
 EXA
 PARALLEL
+TINYFISH
 BRAVE
 ```
 
@@ -319,7 +347,6 @@ other search APIs
 
 Not included in this phase:
 
-- monthly credit/budget tracking;
 - automatic account-quota discovery;
 - query-aware provider scoring;
 - provider latency EWMA;

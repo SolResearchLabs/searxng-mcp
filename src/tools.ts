@@ -813,6 +813,7 @@ const SearchProviderSchema = z.enum([
   "searxng",
   "exa",
   "parallel",
+  "tinyfish",
   "brave",
   "cache",
 ]);

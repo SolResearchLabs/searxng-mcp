@@ -1,7 +1,7 @@
 import type { SearxResult, SearxSearchResult } from "../types.js";
 import type { BudgetHealthState } from "./budget.js";
 
-export type HostedSearchProviderId = "exa" | "parallel" | "brave";
+export type HostedSearchProviderId = "exa" | "parallel" | "tinyfish" | "brave";
 
 export interface HostedSearchCapabilities {
   semantic: boolean;

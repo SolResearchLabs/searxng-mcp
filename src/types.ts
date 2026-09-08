@@ -77,6 +77,7 @@ export type SearchProviderId =
   | "searxng"
   | "exa"
   | "parallel"
+  | "tinyfish"
   | "brave"
   | "cache";
 export type FetchProviderId =

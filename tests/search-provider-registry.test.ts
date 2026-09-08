@@ -9,6 +9,10 @@ const providers = vi.hoisted(() => ({
     configured: vi.fn(),
     search: vi.fn(),
   },
+  tinyfish: {
+    configured: vi.fn(),
+    search: vi.fn(),
+  },
   brave: {
     configured: vi.fn(),
     search: vi.fn(),
@@ -74,6 +78,20 @@ vi.mock("../src/search-providers/parallel.js", () => ({
   },
 }));
 
+vi.mock("../src/search-providers/tinyfish.js", () => ({
+  tinyfishSearchProvider: {
+    id: "tinyfish",
+    capabilities: {
+      semantic: false,
+      recency: true,
+      domains: true,
+      news: true,
+    },
+    configured: providers.tinyfish.configured,
+    search: providers.tinyfish.search,
+  },
+}));
+
 vi.mock("../src/search-providers/brave.js", () => ({
   braveSearchProvider: {
     id: "brave",
@@ -136,9 +154,11 @@ beforeEach(() => {
   delete process.env.HOSTED_SEARCH_FALLBACK_ENABLED;
   providers.exa.configured.mockReturnValue(true);
   providers.parallel.configured.mockReturnValue(true);
+  providers.tinyfish.configured.mockReturnValue(true);
   providers.brave.configured.mockReturnValue(true);
   providers.exa.search.mockResolvedValue([]);
   providers.parallel.search.mockResolvedValue([]);
+  providers.tinyfish.search.mockResolvedValue([]);
   providers.brave.search.mockResolvedValue([]);
   budgets.getStatus.mockImplementation(async (provider: string) =>
     budgetStatus(provider, "disabled"),
@@ -151,20 +171,34 @@ describe("hosted search registry", () => {
     providers.parallel.search.mockResolvedValueOnce([
       result("https://parallel.test", "parallel"),
     ]);
-    providers.brave.search.mockResolvedValueOnce([
-      result("https://brave.test", "brave"),
+    providers.tinyfish.search.mockResolvedValueOnce([
+      result("https://tinyfish.test", "tinyfish"),
     ]);
 
     const fallback = await searchHostedFallback(request);
 
     expect(providers.exa.search).toHaveBeenCalledTimes(1);
     expect(providers.parallel.search).toHaveBeenCalledTimes(1);
+    expect(providers.tinyfish.search).not.toHaveBeenCalled();
     expect(providers.brave.search).not.toHaveBeenCalled();
     expect(fallback?.provider).toBe("parallel");
     expect(fallback?.attempts).toEqual([
       { provider: "exa", outcome: "empty", budgetState: "disabled" },
       { provider: "parallel", outcome: "hit", budgetState: "disabled" },
     ]);
+  });
+
+  it("can route to tinyfish as a first-class provider", async () => {
+    process.env.HOSTED_SEARCH_PROVIDER_ORDER = "tinyfish,exa,parallel,brave";
+    providers.tinyfish.search.mockResolvedValueOnce([
+      result("https://tinyfish.test", "tinyfish"),
+    ]);
+
+    const fallback = await searchHostedFallback(request);
+
+    expect(fallback?.provider).toBe("tinyfish");
+    expect(providers.tinyfish.search).toHaveBeenCalledTimes(1);
+    expect(providers.exa.search).not.toHaveBeenCalled();
   });
 
   it("continues after a provider error instead of failing the whole fallback", async () => {
@@ -200,7 +234,7 @@ describe("hosted search registry", () => {
   });
 
   it("honors an operator-defined provider order", async () => {
-    process.env.HOSTED_SEARCH_PROVIDER_ORDER = "brave,exa,parallel";
+    process.env.HOSTED_SEARCH_PROVIDER_ORDER = "brave,exa,tinyfish,parallel";
     providers.brave.search.mockResolvedValueOnce([
       result("https://brave.test", "brave"),
     ]);
@@ -237,6 +271,7 @@ describe("hosted search registry", () => {
     expect(fallback).toBeNull();
     expect(providers.exa.search).not.toHaveBeenCalled();
     expect(providers.parallel.search).toHaveBeenCalledTimes(1);
+    expect(providers.tinyfish.search).toHaveBeenCalledTimes(1);
     expect(providers.brave.search).toHaveBeenCalledTimes(1);
   });
 
@@ -262,11 +297,16 @@ describe("hosted search registry", () => {
     await expect(searchHostedFallback(request)).resolves.toBeNull();
     expect(providers.exa.search).not.toHaveBeenCalled();
     expect(providers.parallel.search).not.toHaveBeenCalled();
+    expect(providers.tinyfish.search).not.toHaveBeenCalled();
     expect(providers.brave.search).not.toHaveBeenCalled();
   });
 
   it("reports only configured providers", () => {
     providers.parallel.configured.mockReturnValue(false);
-    expect(configuredHostedSearchProviders()).toEqual(["exa", "brave"]);
+    expect(configuredHostedSearchProviders()).toEqual([
+      "exa",
+      "tinyfish",
+      "brave",
+    ]);
   });
 });

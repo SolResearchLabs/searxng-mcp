@@ -44,6 +44,7 @@ function makeControl(id: HostedSearchProviderId): HostedProviderControl {
 const controls: Record<HostedSearchProviderId, HostedProviderControl> = {
   exa: makeControl("exa"),
   parallel: makeControl("parallel"),
+  tinyfish: makeControl("tinyfish"),
   brave: makeControl("brave"),
 };
 

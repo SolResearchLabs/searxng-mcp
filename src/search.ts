@@ -298,22 +298,33 @@ export async function searxSearch(
         | { results: SearxResult[]; meta?: SearxMeta; route?: SearchRoute };
       const results = Array.isArray(parsed) ? parsed : parsed.results;
       const siteResults = filterResultsToSites(results, site);
-      const meta = Array.isArray(parsed)
-        ? EMPTY_META
-        : (parsed.meta ?? EMPTY_META);
-      // Cache-hit provenance: keep the original provider if the entry carries
-      // it; a legacy entry without stored provenance honestly reports "cache"
-      // (never an inferred provider).
-      const route = Array.isArray(parsed)
-        ? { provider: "cache" as const, cacheHit: true }
-        : searchRouteForCacheHit(parsed);
-      recordSearchAppearances(siteResults);
-      // Domain filtering applied after cache retrieval so profile changes take effect immediately
-      return {
-        results: applyDomainFilters(siteResults, domainProfile),
-        meta,
-        route,
-      };
+      const siteConstraintActive = siteDomains(site).length > 0;
+
+      // A pre-fix cache entry may contain only off-site results because older
+      // builds trusted the provider's best-effort site: operator. If strict
+      // post-filtering empties a site-constrained cache hit, treat the entry as
+      // stale and fall through to live search/fallback instead of returning a
+      // fast but false "No results found."
+      if (!siteConstraintActive || siteResults.length > 0) {
+        const meta = siteConstraintActive
+          ? EMPTY_META
+          : Array.isArray(parsed)
+            ? EMPTY_META
+            : (parsed.meta ?? EMPTY_META);
+        // Cache-hit provenance: keep the original provider if the entry carries
+        // it; a legacy entry without stored provenance honestly reports "cache"
+        // (never an inferred provider).
+        const route = Array.isArray(parsed)
+          ? { provider: "cache" as const, cacheHit: true }
+          : searchRouteForCacheHit(parsed);
+        recordSearchAppearances(siteResults);
+        // Domain filtering applied after cache retrieval so profile changes take effect immediately
+        return {
+          results: applyDomainFilters(siteResults, domainProfile),
+          meta,
+          route,
+        };
+      }
     } catch {
       // Corrupted cache entry — fall through to live fetch
     }

@@ -105,6 +105,32 @@ describe("searxSearch", () => {
     expect(results[0].url).toBe("https://cached.com");
   });
 
+  it("revalidates a site-constrained cache hit when strict filtering empties it", async () => {
+    vi.mocked(cacheGet).mockResolvedValue(
+      JSON.stringify([makeResult("https://github.com/login")]),
+    );
+    mockFetch.mockResolvedValue(
+      mockSearxResponse([makeResult("https://docs.github.com/en/actions")]),
+    );
+
+    const { results } = await searxSearch(
+      "GitHub Actions documentation",
+      "general",
+      5,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      "docs.github.com",
+    );
+
+    expect(mockFetch).toHaveBeenCalled();
+    expect(results.map((result) => result.url)).toEqual([
+      "https://docs.github.com/en/actions",
+    ]);
+  });
+
   it("applies domain filters after cache retrieval on cache hit", async () => {
     const cached = JSON.stringify([makeResult("https://cached.com")]);
     vi.mocked(cacheGet).mockResolvedValue(cached);

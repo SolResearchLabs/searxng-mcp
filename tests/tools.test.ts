@@ -201,7 +201,9 @@ describe("handleSearchAndFetch", () => {
   });
 
   it("backfills a failed top result from the next ranked result", async () => {
-    vi.mocked(fetchPage).mockRejectedValueOnce(new Error("PDF extraction failed"));
+    vi.mocked(fetchPage).mockRejectedValueOnce(
+      new Error("PDF extraction failed"),
+    );
     const result = await handleSearchAndFetch({
       query: "test",
       fetch_count: 1,

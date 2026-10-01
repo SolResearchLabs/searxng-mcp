@@ -119,10 +119,7 @@ function formatFetchedSections(
   desiredCount: number,
 ): string {
   const fullContent = fetched.pages
-    .map(
-      ({ page }) =>
-        `\n\n--- Full content: ${page.title} ---\n${page.text}`,
-    )
+    .map(({ page }) => `\n\n--- Full content: ${page.title} ---\n${page.text}`)
     .join("");
 
   if (fetched.pages.length >= desiredCount) return fullContent;
@@ -565,10 +562,7 @@ export async function handleSearchAndSummarize({
         );
 
         if (!summaryResult.summary) {
-          const fetchedSections = formatFetchedSections(
-            fetched,
-            fetch_count,
-          );
+          const fetchedSections = formatFetchedSections(fetched, fetch_count);
           return {
             ranked,
             rerankApplied: true,

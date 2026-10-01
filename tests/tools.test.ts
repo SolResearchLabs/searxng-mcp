@@ -301,9 +301,10 @@ describe("handleSearchAndSummarize", () => {
       fetch_count: 2,
     });
     expect(fetchPage).toHaveBeenCalledTimes(2);
-    expect(
-      vi.mocked(fetchPage).mock.calls.map(([url]) => url),
-    ).toEqual(["https://example.com/2", "https://example.com/3"]);
+    expect(vi.mocked(fetchPage).mock.calls.map(([url]) => url)).toEqual([
+      "https://example.com/2",
+      "https://example.com/3",
+    ]);
     expect(result.content[0].text).not.toContain("Could not fetch result");
   });
 

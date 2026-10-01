@@ -13,7 +13,7 @@ import {
 } from "./domain-stats.js";
 import { events } from "./events.js";
 import { fetchPage } from "./fetch.js";
-import type { FetchTuning } from "./fetch-utils.js";
+import { type FetchTuning, isPdfUrl } from "./fetch-utils.js";
 import { incCounter, recordHistogram, withSpan } from "./observability.js";
 import { formatSummaryResult, summarizePages } from "./ollama.js";
 import { rerankWithFallback } from "./reranker.js";
@@ -62,6 +62,15 @@ interface RankedFetchFailure {
 interface RankedFetchRun {
   pages: RankedFetchedPage[];
   failures: RankedFetchFailure[];
+}
+
+function prioritizeFetchCandidates(ranked: SearxResult[]): SearxResult[] {
+  const htmlLike: SearxResult[] = [];
+  const pdfs: SearxResult[] = [];
+  for (const result of ranked) {
+    (isPdfUrl(result.url) ? pdfs : htmlLike).push(result);
+  }
+  return [...htmlLike, ...pdfs];
 }
 
 async function fetchRankedWithBackfill(
@@ -410,7 +419,7 @@ export async function handleSearchAndFetch({
         } = await searxSearch(
           query,
           category ?? "general",
-          5,
+          10,
           time_range,
           domain_profile,
           expand,
@@ -435,11 +444,12 @@ export async function handleSearchAndFetch({
             },
           };
         }
-        const ranked = await rerankWithFallback(query, raw, 5, time_range);
+        const rankedPool = await rerankWithFallback(query, raw, 10, time_range);
+        const ranked = rankedPool.slice(0, 5);
         const searchText = formatResults(ranked);
         const maxCharsPerPage = Math.floor(8000 / fetch_count);
         const fetched = await fetchRankedWithBackfill(
-          ranked,
+          prioritizeFetchCandidates(rankedPool),
           fetch_count,
           maxCharsPerPage,
           domain_profile,
@@ -510,7 +520,7 @@ export async function handleSearchAndSummarize({
         } = await searxSearch(
           query,
           category ?? "general",
-          fetch_count + 2,
+          10,
           time_range,
           domain_profile,
           expand,
@@ -538,13 +548,13 @@ export async function handleSearchAndSummarize({
         const rankedPool = await rerankWithFallback(
           query,
           raw,
-          Math.min(fetch_count + 2, raw.length),
+          Math.min(10, raw.length),
           time_range,
         );
         const ranked = rankedPool.slice(0, fetch_count);
         const searchText = formatResults(ranked);
         const fetched = await fetchRankedWithBackfill(
-          rankedPool,
+          prioritizeFetchCandidates(rankedPool),
           fetch_count,
           4000,
           domain_profile,

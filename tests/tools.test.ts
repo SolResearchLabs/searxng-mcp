@@ -200,6 +200,37 @@ describe("handleSearchAndFetch", () => {
     expect(fetchPage).not.toHaveBeenCalled();
   });
 
+  it("prefers non-PDF pages for full-text fetches", async () => {
+    vi.mocked(searxSearch).mockResolvedValueOnce({
+      results: [
+        {
+          title: "PDF",
+          url: "https://example.com/report.pdf",
+          content: "report",
+          engines: ["bing"],
+        },
+        {
+          title: "HTML",
+          url: "https://example.com/page",
+          content: "page",
+          engines: ["bing"],
+        },
+      ],
+      meta: EMPTY_META,
+      route: { provider: "searxng", engines: ["bing"] },
+    });
+    await handleSearchAndFetch({
+      query: "test",
+      fetch_count: 1,
+    });
+    expect(vi.mocked(fetchPage).mock.calls[0]?.[0]).toBe(
+      "https://example.com/page",
+    );
+    expect(
+      vi.mocked(fetchPage).mock.calls.some(([url]) => url.endsWith(".pdf")),
+    ).toBe(false);
+  });
+
   it("backfills a failed top result from the next ranked result", async () => {
     vi.mocked(fetchPage).mockRejectedValueOnce(
       new Error("PDF extraction failed"),
@@ -265,17 +296,14 @@ describe("handleSearchAndSummarize", () => {
       meta: EMPTY_META,
       route: { provider: "searxng", engines: ["bing"] },
     });
-    vi.mocked(fetchPage).mockRejectedValueOnce(
-      new Error("PDF extraction failed"),
-    );
     const result = await handleSearchAndSummarize({
       query: "test",
       fetch_count: 2,
     });
-    expect(fetchPage).toHaveBeenCalledTimes(3);
-    expect(vi.mocked(fetchPage).mock.calls[2]?.[0]).toBe(
-      "https://example.com/3",
-    );
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(
+      vi.mocked(fetchPage).mock.calls.map(([url]) => url),
+    ).toEqual(["https://example.com/2", "https://example.com/3"]);
     expect(result.content[0].text).not.toContain("Could not fetch result");
   });
 

@@ -416,9 +416,7 @@ export async function fetchPage(
           pdfTier.fetch(url, storeChars, preferFit),
         );
         if (!pdfResult) {
-          throw new Error(
-            "PDF extraction requires Crawl4AI (CRAWL4AI_URL not configured)",
-          );
+          throw new Error("PDF extraction failed in Crawl4AI");
         }
         const persisted = {
           title: pdfResult.title,

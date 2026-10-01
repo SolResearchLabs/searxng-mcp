@@ -42,20 +42,101 @@ function withResearchRouteLine(
   return line ? `${line}\n\n${body}` : body;
 }
 
-function fetchRoutesOf(
-  settled: Array<
-    PromiseSettledResult<{
-      title: string;
-      url: string;
-      text: string;
-      route: FetchRoute | null;
-    }>
-  >,
-): FetchRoute[] {
-  return settled
-    .filter((r) => r.status === "fulfilled")
-    .map((r) => r.value.route)
-    .filter((r): r is FetchRoute => r !== null);
+interface RankedFetchedPage {
+  rank: number;
+  result: SearxResult;
+  page: {
+    title: string;
+    url: string;
+    text: string;
+    route: FetchRoute | null;
+  };
+}
+
+interface RankedFetchFailure {
+  rank: number;
+  result: SearxResult;
+  error: string;
+}
+
+interface RankedFetchRun {
+  pages: RankedFetchedPage[];
+  failures: RankedFetchFailure[];
+}
+
+async function fetchRankedWithBackfill(
+  ranked: SearxResult[],
+  desiredCount: number,
+  maxChars: number,
+  domainProfile?: string,
+  preferFit = false,
+): Promise<RankedFetchRun> {
+  const pages: RankedFetchedPage[] = [];
+  const failures: RankedFetchFailure[] = [];
+  let cursor = 0;
+
+  while (cursor < ranked.length && pages.length < desiredCount) {
+    const needed = desiredCount - pages.length;
+    const start = cursor;
+    const candidates = ranked.slice(cursor, cursor + needed);
+    cursor += candidates.length;
+
+    const settled = await Promise.allSettled(
+      candidates.map((result) =>
+        fetchPage(result.url, maxChars, domainProfile, preferFit),
+      ),
+    );
+
+    settled.forEach((outcome, index) => {
+      const result = candidates[index];
+      const rank = start + index;
+      if (outcome.status === "fulfilled") {
+        pages.push({ rank, result, page: outcome.value });
+        return;
+      }
+      failures.push({
+        rank,
+        result,
+        error:
+          outcome.reason instanceof Error
+            ? outcome.reason.message
+            : String(outcome.reason),
+      });
+    });
+  }
+
+  return { pages, failures };
+}
+
+function fetchRoutesOfPages(pages: RankedFetchedPage[]): FetchRoute[] {
+  return pages
+    .map(({ page }) => page.route)
+    .filter((route): route is FetchRoute => route !== null);
+}
+
+function formatFetchedSections(
+  fetched: RankedFetchRun,
+  desiredCount: number,
+): string {
+  const fullContent = fetched.pages
+    .map(
+      ({ page }) =>
+        `\n\n--- Full content: ${page.title} ---\n${page.text}`,
+    )
+    .join("");
+
+  if (fetched.pages.length >= desiredCount) return fullContent;
+
+  const missing = desiredCount - fetched.pages.length;
+  const failureContent = fetched.failures
+    .slice(0, missing)
+    .map(
+      ({ rank, error }) =>
+        `\n\n--- Could not fetch result ${rank + 1}: ${error} ---`,
+    )
+    .join("");
+
+  return fullContent + failureContent;
 }
 
 // Compose the per-request provenance from whatever served. `searchRoute` is the
@@ -360,26 +441,16 @@ export async function handleSearchAndFetch({
         const ranked = await rerankWithFallback(query, raw, 5, time_range);
         const searchText = formatResults(ranked);
         const maxCharsPerPage = Math.floor(8000 / fetch_count);
-        const toFetch = ranked.slice(0, fetch_count);
-        const fetched = await Promise.allSettled(
-          toFetch.map((r) => fetchPage(r.url, maxCharsPerPage, domain_profile)),
+        const fetched = await fetchRankedWithBackfill(
+          ranked,
+          fetch_count,
+          maxCharsPerPage,
+          domain_profile,
         );
-        const fetchedSections = fetched
-          .map((result, i) => {
-            if (result.status === "fulfilled") {
-              const { title, text } = result.value;
-              return `\n\n--- Full content: ${title} ---\n${text}`;
-            }
-            const err =
-              result.reason instanceof Error
-                ? result.reason.message
-                : String(result.reason);
-            return `\n\n--- Could not fetch result ${i + 1}: ${err} ---`;
-          })
-          .join("");
+        const fetchedSections = formatFetchedSections(fetched, fetch_count);
         const researchRoute: ResearchRoute | undefined = buildResearchRoute(
           searchRoute,
-          aggregateFetchRoutes(fetchRoutesOf(fetched)),
+          aggregateFetchRoutes(fetchRoutesOfPages(fetched.pages)),
         );
         return {
           ranked,
@@ -467,32 +538,25 @@ export async function handleSearchAndSummarize({
             },
           };
         }
-        const ranked = await rerankWithFallback(
+        const rankedPool = await rerankWithFallback(
           query,
           raw,
-          fetch_count,
+          Math.min(fetch_count + 2, raw.length),
           time_range,
         );
+        const ranked = rankedPool.slice(0, fetch_count);
         const searchText = formatResults(ranked);
-        const toFetch = ranked.slice(0, fetch_count);
-        const fetched = await Promise.allSettled(
-          toFetch.map((r) => fetchPage(r.url, 4000, domain_profile, true)),
+        const fetched = await fetchRankedWithBackfill(
+          rankedPool,
+          fetch_count,
+          4000,
+          domain_profile,
+          true,
         );
-        const successfulPages = fetched
-          .map((r) => (r.status === "fulfilled" ? r.value : null))
-          .filter(
-            (
-              r,
-            ): r is {
-              title: string;
-              url: string;
-              text: string;
-              route: FetchRoute | null;
-            } => r !== null,
-          );
+        const successfulPages = fetched.pages.map(({ page }) => page);
         const researchRoute: ResearchRoute | undefined = buildResearchRoute(
           searchRoute,
-          aggregateFetchRoutes(fetchRoutesOf(fetched)),
+          aggregateFetchRoutes(fetchRoutesOfPages(fetched.pages)),
         );
         const summaryResult = await withSpan(
           "summarize_llm",
@@ -501,19 +565,10 @@ export async function handleSearchAndSummarize({
         );
 
         if (!summaryResult.summary) {
-          const fetchedSections = fetched
-            .map((result, i) => {
-              if (result.status === "fulfilled") {
-                const { title, text } = result.value;
-                return `\n\n--- Full content: ${title} ---\n${text}`;
-              }
-              const err =
-                result.reason instanceof Error
-                  ? result.reason.message
-                  : String(result.reason);
-              return `\n\n--- Could not fetch result ${i + 1}: ${err} ---`;
-            })
-            .join("");
+          const fetchedSections = formatFetchedSections(
+            fetched,
+            fetch_count,
+          );
           return {
             ranked,
             rerankApplied: true,

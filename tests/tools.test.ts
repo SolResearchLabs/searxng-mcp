@@ -200,12 +200,29 @@ describe("handleSearchAndFetch", () => {
     expect(fetchPage).not.toHaveBeenCalled();
   });
 
-  it("handles fetch failure gracefully with error message", async () => {
-    vi.mocked(fetchPage).mockRejectedValueOnce(new Error("Connection refused"));
+  it("backfills a failed top result from the next ranked result", async () => {
+    vi.mocked(fetchPage).mockRejectedValueOnce(new Error("PDF extraction failed"));
     const result = await handleSearchAndFetch({
       query: "test",
       fetch_count: 1,
     });
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetchPage).mock.calls[1]?.[0]).toBe(
+      "https://example.com/2",
+    );
+    expect(result.content[0].text).toContain("Full content");
+    expect(result.content[0].text).not.toContain("Could not fetch result");
+  });
+
+  it("reports a fetch failure when every ranked candidate fails", async () => {
+    vi.mocked(fetchPage)
+      .mockRejectedValueOnce(new Error("Connection refused"))
+      .mockRejectedValueOnce(new Error("Connection refused"));
+    const result = await handleSearchAndFetch({
+      query: "test",
+      fetch_count: 1,
+    });
+    expect(fetchPage).toHaveBeenCalledTimes(2);
     expect(result.content[0].text).toContain("Could not fetch result 1");
     expect(result.content[0].text).toContain("Connection refused");
   });
@@ -219,6 +236,45 @@ describe("handleSearchAndSummarize", () => {
     });
     // summarizePages returns {summary: "", citations: []} — should fall back
     expect(result.content[0].text).toContain("Full content");
+  });
+
+  it("backfills failed pages before summarizing", async () => {
+    vi.mocked(searxSearch).mockResolvedValueOnce({
+      results: [
+        {
+          title: "PDF",
+          url: "https://example.com/report.pdf",
+          content: "report",
+          engines: ["bing"],
+        },
+        {
+          title: "Page 2",
+          url: "https://example.com/2",
+          content: "two",
+          engines: ["bing"],
+        },
+        {
+          title: "Page 3",
+          url: "https://example.com/3",
+          content: "three",
+          engines: ["bing"],
+        },
+      ],
+      meta: EMPTY_META,
+      route: { provider: "searxng", engines: ["bing"] },
+    });
+    vi.mocked(fetchPage).mockRejectedValueOnce(
+      new Error("PDF extraction failed"),
+    );
+    const result = await handleSearchAndSummarize({
+      query: "test",
+      fetch_count: 2,
+    });
+    expect(fetchPage).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(fetchPage).mock.calls[2]?.[0]).toBe(
+      "https://example.com/3",
+    );
+    expect(result.content[0].text).not.toContain("Could not fetch result");
   });
 
   it("returns No results found when search returns empty", async () => {

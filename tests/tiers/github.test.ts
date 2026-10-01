@@ -41,6 +41,13 @@ describe("isGithubUrl", () => {
     expect(isGithubUrl("https://github.com/TadMSTR/searxng-mcp")).toBe(true);
   });
 
+  it("does not route generic GitHub web pages through the API fast path", () => {
+    expect(isGithubUrl("https://github.com/")).toBe(false);
+    expect(isGithubUrl("https://github.com/login")).toBe(false);
+    expect(isGithubUrl("https://github.com/search?q=actions")).toBe(false);
+    expect(isGithubUrl("https://github.com/features/actions")).toBe(false);
+  });
+
   it("matches raw.githubusercontent.com", () => {
     expect(
       isGithubUrl(

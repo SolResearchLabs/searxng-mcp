@@ -167,9 +167,21 @@ export interface GitHubReadmeResponse {
   html_url: string;
 }
 
-export const CategorySchema = z
-  .enum(["general", "news", "it", "science"])
-  .default("general");
+const CATEGORY_VALUES = ["general", "news", "it", "science"] as const;
+
+function normalizeSingleCategory(value: unknown): unknown {
+  if (Array.isArray(value) && value.length === 1) return value[0];
+  if (typeof value !== "string") return value;
+  const match = value
+    .trim()
+    .match(/^\[\s*["']?(general|news|it|science)["']?\s*\]$/i);
+  return match ? match[1].toLowerCase() : value;
+}
+
+export const CategorySchema = z.preprocess(
+  normalizeSingleCategory,
+  z.enum(CATEGORY_VALUES).default("general"),
+);
 
 export const TimeRangeSchema = z
   .enum(["day", "week", "month", "year"])

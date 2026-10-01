@@ -61,6 +61,47 @@ function siteFilterPrefix(site?: string | string[]): string {
   return `(${domains.map((d) => `site:${d}`).join(" OR ")}) `;
 }
 
+function siteDomains(site?: string | string[]): string[] {
+  if (!site) return [];
+  const values = Array.isArray(site) ? site : [site];
+  const domains: string[] = [];
+  for (const raw of values) {
+    const value = raw.trim();
+    if (!value) continue;
+    try {
+      const hostname = new URL(
+        value.includes("://") ? value : `https://${value}`,
+      ).hostname
+        .toLowerCase()
+        .replace(/\.$/, "");
+      if (hostname) domains.push(hostname);
+    } catch {
+      // Invalid site constraints match no provider results.
+    }
+  }
+  return domains;
+}
+
+function filterResultsToSites(
+  results: SearxResult[],
+  site?: string | string[],
+): SearxResult[] {
+  const domains = siteDomains(site);
+  if (domains.length === 0) return results;
+  return results.filter((result) => {
+    try {
+      const hostname = new URL(result.url).hostname
+        .toLowerCase()
+        .replace(/\.$/, "");
+      return domains.some(
+        (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
 // Collapse SearXNG's version-varying answers/infoboxes/corrections/suggestions
 // into the normalized SearxMeta shape. Silently drops empty entries.
 export function normalizeSearxMeta(data: SearxResponse): SearxMeta {
@@ -141,10 +182,16 @@ export async function searxSearchSingle(
         }
 
         const data = (await res.json()) as SearxResponse;
-        const results = data.results.slice(0, fetchCount);
+        const results = filterResultsToSites(data.results, site).slice(
+          0,
+          fetchCount,
+        );
         return {
           results,
-          meta: normalizeSearxMeta(data),
+          meta:
+            siteDomains(site).length > 0
+              ? EMPTY_META
+              : normalizeSearxMeta(data),
           route: {
             provider: "searxng",
             engines: collectSearchEngines(results),
@@ -205,14 +252,17 @@ async function primarySearchWithFallback(
       site,
     });
     if (fallback) {
-      // Preserve useful SearXNG direct-answer metadata when a live SearXNG
-      // request succeeded but its normal result list was too sparse. The
-      // route records which hosted provider actually served.
-      return {
-        results: fallback.results,
-        meta: primary?.meta ?? fallback.meta,
-        route: { provider: fallback.provider, fallback: true },
-      };
+      const fallbackResults = filterResultsToSites(fallback.results, site);
+      if (fallbackResults.length > 0) {
+        // Preserve useful SearXNG direct-answer metadata when a live SearXNG
+        // request succeeded but its normal result list was too sparse. The
+        // route records which hosted provider actually served.
+        return {
+          results: fallbackResults,
+          meta: primary?.meta ?? fallback.meta,
+          route: { provider: fallback.provider, fallback: true },
+        };
+      }
     }
   }
 
@@ -247,6 +297,7 @@ export async function searxSearch(
         | SearxResult[]
         | { results: SearxResult[]; meta?: SearxMeta; route?: SearchRoute };
       const results = Array.isArray(parsed) ? parsed : parsed.results;
+      const siteResults = filterResultsToSites(results, site);
       const meta = Array.isArray(parsed)
         ? EMPTY_META
         : (parsed.meta ?? EMPTY_META);
@@ -256,10 +307,10 @@ export async function searxSearch(
       const route = Array.isArray(parsed)
         ? { provider: "cache" as const, cacheHit: true }
         : searchRouteForCacheHit(parsed);
-      recordSearchAppearances(results);
+      recordSearchAppearances(siteResults);
       // Domain filtering applied after cache retrieval so profile changes take effect immediately
       return {
-        results: applyDomainFilters(results, domainProfile),
+        results: applyDomainFilters(siteResults, domainProfile),
         meta,
         route,
       };

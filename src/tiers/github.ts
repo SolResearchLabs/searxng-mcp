@@ -9,9 +9,42 @@ export const GITHUB_HOSTS = new Set([
   "api.github.com",
 ]);
 
+const GITHUB_WEB_ROUTES = new Set([
+  "about",
+  "apps",
+  "collections",
+  "enterprise",
+  "explore",
+  "features",
+  "join",
+  "login",
+  "marketplace",
+  "new",
+  "notifications",
+  "orgs",
+  "organizations",
+  "pricing",
+  "search",
+  "security",
+  "settings",
+  "sponsors",
+  "topics",
+  "trending",
+]);
+
 export function isGithubUrl(url: string): boolean {
   try {
-    return GITHUB_HOSTS.has(new URL(url).hostname);
+    const parsed = new URL(url);
+    if (
+      parsed.hostname === "raw.githubusercontent.com" ||
+      parsed.hostname === "api.github.com"
+    ) {
+      return true;
+    }
+    if (parsed.hostname !== "github.com") return false;
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) return false;
+    return !GITHUB_WEB_ROUTES.has(parts[0].toLowerCase());
   } catch {
     return false;
   }

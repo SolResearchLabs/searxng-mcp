@@ -66,7 +66,11 @@ function mockSearxResponse(results: object[]) {
 import { cacheGet, cacheSet } from "../src/cache.js";
 import { recordSearchAppearance } from "../src/domain-db.js";
 import { applyDomainFilters } from "../src/domains.js";
-import { normalizeSearxMeta, searxSearch } from "../src/search.js";
+import {
+  normalizeSearxMeta,
+  searxSearch,
+  searxSearchSingle,
+} from "../src/search.js";
 import { searchHostedFallback } from "../src/search-providers/index.js";
 
 beforeEach(() => {
@@ -237,6 +241,28 @@ describe("searxSearch", () => {
     expect(calledUrl).toContain("site%3Agithub.com");
   });
 
+  it("strictly removes off-site results when site is provided", async () => {
+    mockFetch.mockResolvedValue(
+      mockSearxResponse([
+        makeResult("https://github.com/login"),
+        makeResult("https://docs.github.com/en/actions"),
+        makeResult("https://evil.example/docs"),
+      ]),
+    );
+    const { results } = await searxSearchSingle(
+      "GitHub Actions documentation",
+      "general",
+      5,
+      undefined,
+      undefined,
+      undefined,
+      "docs.github.com",
+    );
+    expect(results.map((r) => r.url)).toEqual([
+      "https://docs.github.com/en/actions",
+    ]);
+  });
+
   it("applies an array of site: filters with OR", async () => {
     mockFetch.mockResolvedValue(mockSearxResponse([]));
     await searxSearch(
@@ -359,6 +385,14 @@ describe("CategorySchema", () => {
 
   it("defaults to 'general' when undefined", () => {
     expect(CategorySchema.parse(undefined)).toBe("general");
+  });
+
+  it("normalizes a single-item category array", () => {
+    expect(CategorySchema.parse(["news"])).toBe("news");
+  });
+
+  it("normalizes a stringified single-item category array", () => {
+    expect(CategorySchema.parse("['news']")).toBe("news");
   });
 
   it("rejects invalid category", () => {

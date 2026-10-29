@@ -1,4 +1,5 @@
 import { RERANK_RECENCY_WEIGHT, RERANKER_URL } from "./config.js";
+import { lexicalRerank } from "./lexical-relevance.js";
 import { logThrottled } from "./log.js";
 import { withSpan } from "./observability.js";
 import type { RerankResponse, SearxResult } from "./types.js";
@@ -69,13 +70,14 @@ export async function rerankWithFallback(
       try {
         return await rerank(query, results, topN, applyRecency);
       } catch (err) {
-        // Reranker unavailable — fall back to SearXNG order. Silent otherwise;
-        // one throttled line makes "why did ranking quality drop" answerable.
+        // Reranker unavailable: keep search useful without trusting raw engine
+        // order. The deterministic lexical fallback is dependency-free and
+        // preserves original order when it has no query signal.
         logThrottled(
           "degrade:reranker",
-          `reranker unavailable — using SearXNG result order: ${err instanceof Error ? err.message : String(err)}`,
+          `reranker unavailable - using lexical relevance fallback: ${err instanceof Error ? err.message : String(err)}`,
         );
-        return results.slice(0, topN);
+        return lexicalRerank(query, results, topN);
       }
     },
   );

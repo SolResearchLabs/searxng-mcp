@@ -1,4 +1,5 @@
-import type { SearxMeta } from "../types.js";
+import { hasQueryRelevantResult } from "../lexical-relevance.js";
+import type { SearxMeta, SearxResult } from "../types.js";
 import { braveSearchProvider } from "./brave.js";
 import {
   budgetRoutingRank,
@@ -62,11 +63,20 @@ export function hostedSearchFallbackMinResults(): number {
 export function hasUsefulPrimarySearch(
   resultsCount: number,
   meta: SearxMeta,
+  query?: string,
+  results?: SearxResult[],
 ): boolean {
-  if (resultsCount >= hostedSearchFallbackMinResults()) return true;
   // SearXNG direct answers/infoboxes are already useful even when its ordinary
   // web result list is empty. Do not spend hosted-search quota unnecessarily.
-  return meta.answers.length > 0 || meta.infoboxes.length > 0;
+  if (meta.answers.length > 0 || meta.infoboxes.length > 0) return true;
+  if (resultsCount < hostedSearchFallbackMinResults()) return false;
+
+  // Result count alone is not quality. Bing can return a full page of unrelated
+  // results for a healthy HTTP request. When query/result context is available,
+  // require a small deterministic lexical overlap before declaring success.
+  // If older callers omit that context, preserve the historical count behavior.
+  if (query && results) return hasQueryRelevantResult(query, results);
+  return true;
 }
 
 interface BudgetCandidate {

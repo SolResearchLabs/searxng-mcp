@@ -235,7 +235,14 @@ async function primarySearchWithFallback(
       engines,
       site,
     );
-    if (hasUsefulPrimarySearch(primary.results.length, primary.meta)) {
+    if (
+      hasUsefulPrimarySearch(
+        primary.results.length,
+        primary.meta,
+        query,
+        primary.results,
+      )
+    ) {
       return primary;
     }
   } catch (err) {
@@ -317,13 +324,26 @@ export async function searxSearch(
         const route = Array.isArray(parsed)
           ? { provider: "cache" as const, cacheHit: true }
           : searchRouteForCacheHit(parsed);
-        recordSearchAppearances(siteResults);
-        // Domain filtering applied after cache retrieval so profile changes take effect immediately
-        return {
-          results: applyDomainFilters(siteResults, domainProfile),
-          meta,
-          route,
-        };
+        const profiledResults = applyDomainFilters(siteResults, domainProfile);
+        // Old cache entries may also contain a full page of semantically
+        // unrelated engine noise. Reuse the same quality gate as live search so
+        // a bad cached result set is treated as stale and can recover through
+        // the normal live/hosted fallback path immediately.
+        if (
+          hasUsefulPrimarySearch(
+            profiledResults.length,
+            meta,
+            query,
+            profiledResults,
+          )
+        ) {
+          recordSearchAppearances(profiledResults);
+          return {
+            results: profiledResults,
+            meta,
+            route,
+          };
+        }
       }
     } catch {
       // Corrupted cache entry — fall through to live fetch

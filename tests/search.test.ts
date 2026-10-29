@@ -11,11 +11,18 @@ vi.mock("../src/ollama.js", () => ({
   expandQuery: vi.fn().mockResolvedValue(["variant 1", "variant 2"]),
 }));
 
-// Hosted search fallback is gated on env + budget, so it's mocked outright for
-// the provenance test. hasUsefulPrimarySearch is forced false so the fallback
-// path actually runs; searchHostedFallback returns a controlled provider.
+// Hosted search fallback is gated on env + budget, so it is mocked outright.
+// Cache-hit tests explicitly mark their synthetic cached.com fixtures useful;
+// other primary results remain "not useful" so fallback-path coverage is kept.
 vi.mock("../src/search-providers/index.js", () => ({
-  hasUsefulPrimarySearch: vi.fn(() => false),
+  hasUsefulPrimarySearch: vi.fn(
+    (
+      _count: number,
+      _meta: unknown,
+      _query?: string,
+      results?: Array<{ url?: string }>,
+    ) => results?.some((result) => result.url?.includes("cached.com")) ?? false,
+  ),
   searchHostedFallback: vi.fn(),
   hostedSearchFallbackEnabled: vi.fn(() => true),
   hostedSearchFallbackMinResults: vi.fn(() => 1),
@@ -103,6 +110,27 @@ describe("searxSearch", () => {
     expect(mockFetch).not.toHaveBeenCalled();
     expect(results).toHaveLength(1);
     expect(results[0].url).toBe("https://cached.com");
+  });
+
+  it("treats semantically bad cached engine noise as stale", async () => {
+    const cached = JSON.stringify([
+      makeResult("https://www.sportsnet.ca/"),
+      makeResult("https://www.sportsnet.ca/hockey/nhl/"),
+      makeResult("https://www.sportsnet.ca/baseball/mlb/"),
+    ]);
+    vi.mocked(cacheGet).mockResolvedValue(cached);
+    mockFetch.mockResolvedValue(
+      mockSearxResponse([makeResult("https://www.bcrea.bc.ca/")]),
+    );
+
+    const { results } = await searxSearch(
+      "BCREA British Columbia Real Estate Association rules regulations",
+      "general",
+      5,
+    );
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(results[0].url).toBe("https://www.bcrea.bc.ca/");
   });
 
   it("revalidates a site-constrained cache hit when strict filtering empties it", async () => {
